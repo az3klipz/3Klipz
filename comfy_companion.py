@@ -293,7 +293,7 @@ APP_TITLE = f"{APP_NAME} {APP_EDITION}"
 # the update checker (_check_for_updates) no-ops silently (logs one line,
 # never blocks/errors) while this is still the placeholder, so leaving it
 # unset is completely safe.
-GITHUB_REPO = "YOUR_USERNAME/3klipz-studio"
+GITHUB_REPO = "az3klipz/3Klipz"
 
 # ── LLM engine registry: adding an engine = one entry, zero UI changes ──
 LLM_REGISTRY = [
