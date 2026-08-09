@@ -14486,6 +14486,52 @@ Click history arrows to replay generations
         set_status(f"DONE -> {out_path.name}")
         return out_path, positive
 
+    def _run_waifu_specialty_pipeline(self, persona, set_status=None):
+        """v10.4: dedicated Auto-Pilot cycle for Mature Content Mode -
+        same busy-flag-free/done_cb-free shape as
+        _run_photography_pilot_pipeline (single _hifi_master portrait
+        pass, no best-of-N). Gated on _mature_allowed() BOTH here
+        (defensive - never generate mature content if the toggle is off
+        or this is the Kids build) and at the cfg/checkbox level in the
+        Auto-Pilot dialog - belt-and-braces, matching this app's
+        established safety-gate convention. Reuses the same rotating
+        MATURE_ATTIRE_VARIATIONS/MATURE_SCENE_VARIATIONS pools as the
+        mature-mode character-invention prompt, so a long session gets
+        real variety here too. The always-on SAFETY_FLOOR_NEGATIVE is
+        untouched - enforced unconditionally inside build_txt2img_
+        workflow regardless of this toggle's state."""
+        set_status = set_status or (lambda t: None)
+        if not self._mature_allowed():
+            return None, None
+        name = persona.get("name", "unknown")
+        visual = persona.get("visual_details", "")
+        attire = random.choice(MATURE_ATTIRE_VARIATIONS)
+        scene = random.choice(MATURE_SCENE_VARIATIONS)
+        style = self.taste.pick_style("autopilot_waifu", ART_STYLES)
+        positive = self.wildcards.expand(
+            f"{QUALITY}, {name}, {visual}, wearing {attire}, {scene}, "
+            f"alluring pose, beautiful anime waifu, {style}")
+        negative = self.neg_text.get("1.0", "end").strip() \
+            if hasattr(self, "neg_text") else DEFAULT_NEGATIVE
+        set_status(f"Waifu Specialty: {name} ({attire})")
+        try:
+            tmp = self._hifi_master(
+                positive, negative, orientation="portrait", hifi=True,
+                ckpt=self.ckpt_var.get(), log=self.log)
+        except Exception as e:
+            self.log(f"Waifu Specialty ERROR: {e}")
+            set_status(f"Failed: {e}")
+            return None, None
+        stamp = f"3klipz_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        safe_name = re.sub(r"[^\w\-]+", "_", name)[:30]
+        out_dir = self.output_dir / "waifu_specialty_pilot"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{stamp}_{safe_name}.png"
+        tmp.replace(out_path)
+        self.log(f"Waifu Specialty: {name} ({attire}) -> {out_path.name}")
+        set_status(f"DONE -> {out_path.name}")
+        return out_path, positive
+
     def _cinematic_worker(self, scene, mode_name, style, persona,
                           aspect_name, set_status, done_cb):
         self.busy = True
@@ -26111,6 +26157,34 @@ Top 5 Personas:
             "\U0001f4f7 Photography Pilot cycles (real camera/lighting "
             "styles - street, film noir, macro, golden hour, etc.)", 5)
 
+        # v10.4: Waifu Specialty cycles - gated on _mature_allowed(), NOT
+        # needs_sdxl, since the two conditions are unrelated (checkpoint
+        # architecture vs. content-mode toggle). Always hard-disabled in
+        # the Kids build (_mature_allowed() returns False unconditionally
+        # there) and disabled here whenever Mature Content Mode's own
+        # checkbox is off, so this can never fire content the user didn't
+        # explicitly opt into via that separate toggle.
+        mature_ok = self._mature_allowed()
+        waifu_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            sf, text="\U0001f525 Waifu Specialty cycles (Mature Content "
+            "Mode required)", variable=waifu_var, bg=self.PANEL,
+            fg=self.FG_DIM, selectcolor=self.INPUT_BG,
+            activebackground=self.PANEL,
+            state="normal" if (mature_ok and not needs_sdxl)
+            else "disabled").pack(anchor="w", padx=14)
+        if not mature_ok:
+            tk.Label(sf, text="enable \U0001f512 Mature Content Mode in the "
+                     "main window first", bg=self.PANEL, fg=self.WARN_TEXT,
+                     font=self.font_small).pack(anchor="w", padx=34)
+        wferow = tk.Frame(sf, bg=self.PANEL)
+        wferow.pack(fill="x", padx=34)
+        tk.Label(wferow, text="every N images", bg=self.PANEL,
+                 fg=self.FG_MUTED, font=self.font_small).pack(side="left")
+        waifu_every_var = tk.IntVar(value=6)
+        ttk.Spinbox(wferow, textvariable=waifu_every_var, from_=2, to=20,
+                   width=6).pack(side="left", padx=6)
+
         # --- SECTION 5B: GENERATION VARIANCE ---
         tk.Label(sf, text="🎲 GENERATION VARIANCE", bg=self.PANEL,
                  fg=self.ACCENT, font=self.font_body_bold).pack(
@@ -26218,6 +26292,9 @@ Top 5 Personas:
                 "storyboard_every": int(storyboard_every_var.get()),
                 "photography_cycles": bool(photography_var.get()) and not needs_sdxl,
                 "photography_every": int(photography_every_var.get()),
+                "waifu_cycles": bool(waifu_var.get()) and not needs_sdxl
+                                and self._mature_allowed(),
+                "waifu_every": int(waifu_every_var.get()),
                 "var_models": bool(var_models_var.get()) and not needs_sdxl,
                 "var_models_every": int(var_models_every_var.get()),
                 "var_loras": bool(var_loras_var.get()),
@@ -26474,7 +26551,8 @@ Top 5 Personas:
                  "scores": [], "per_style": {}, "characters_invented": 0,
                  "fusion_blends": 0, "wallpapers_generated": 0,
                  "cinematic_scenes_generated": 0, "fashion_generated": 0,
-                 "storyboards_generated": 0, "photography_generated": 0}
+                 "storyboards_generated": 0, "photography_generated": 0,
+                 "waifu_generated": 0}
         if resume_state and resume_state.get("stats"):
             # merge onto defaults so a resume from an older/newer schema
             # (missing a counter key) never KeyErrors mid-session
@@ -26590,6 +26668,18 @@ Top 5 Personas:
                                   not is_fashion and not is_storyboard and
                                   cfg.get("photography_cycles") and
                                   cycle_number % cfg["photography_every"] == 0)
+                # v10.4: also re-checks _mature_allowed() live (not just
+                # at cfg-build time) - if the user turns Mature Content
+                # Mode off mid-session, this cycle stops firing on the
+                # very next check rather than continuing on a stale cfg
+                # value from when the dialog was opened.
+                is_waifu = (not is_invent and not is_fusion and
+                           not is_wallpaper and not is_cinematic and
+                           not is_fashion and not is_storyboard and
+                           not is_photography and
+                           cfg.get("waifu_cycles") and
+                           self._mature_allowed() and
+                           cycle_number % cfg["waifu_every"] == 0)
 
                 if is_invent:
                     label = f"Auto-Pilot (character): "
@@ -26787,6 +26877,31 @@ Top 5 Personas:
                         extra_stat_key="photography_generated")
                     continue
 
+                if is_waifu:
+                    persona = self._ap_pop_persona(queue, known_personas)
+                    name = persona.get("name", "unknown")
+                    self.set_status(f"Auto-Pilot (waifu): {name}",
+                                    self.ACCENT)
+                    dest_tmp, positive = self._run_waifu_specialty_pipeline(
+                        persona)
+                    if dest_tmp is None:
+                        self.log("Auto-Pilot: waifu specialty cycle "
+                                 "failed or Mature Content Mode was "
+                                 "turned off, continuing")
+                        continue
+                    dest2 = session_dir / f"ap_waifu_c{cycle_number}.png"
+                    dest_tmp.replace(dest2)
+                    metrics = self.quality_calculator.calculate_image_quality(
+                        dest2)
+                    score = self.quality_calculator.calculate_overall_quality_score(
+                        metrics)
+                    self._ap_finish_item(
+                        dest2, metrics, score, name=name, style="waifu",
+                        mode="Portrait", positive=positive,
+                        session_dir=session_dir, cfg=cfg, stats=stats,
+                        extra_stat_key="waifu_generated")
+                    continue
+
                 fusion_other = None
                 if is_fusion:
                     p1 = random.choice(known_personas)
@@ -26981,6 +27096,7 @@ Top 5 Personas:
                 f"Fashion designs generated: {stats['fashion_generated']}\n"
                 f"Storyboards generated: {stats['storyboards_generated']}\n"
                 f"Photography generated: {stats['photography_generated']}\n"
+                f"Waifu Specialty generated: {stats['waifu_generated']}\n"
                 f"Average score: {avg:.2f}/10\n"
                 f"Best score: {best_score:.1f}/10\n"
                 f"Elapsed: {elapsed / 60:.1f} min\n\n"
