@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec.bak
+
+# Runtime state / generated content - never belongs in source control
+*.json
+generated_anime/
+crash.log
+
+# Model/binary assets - handled outside this repo
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
