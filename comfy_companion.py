@@ -7790,6 +7790,30 @@ VIRAL_BOOST = ("eye-catching composition, dramatic lighting, high contrast, "
 SHARED_MODELS_DIR = (r"C:\Users\phase\AppData\Local\Comfy-Desktop"
                      r"\ComfyUI-Shared\models")
 
+# v9.11: real Wan 2.1 I2V checkpoints, for machines with more VRAM than
+# this dev machine's 6GB card (real local I2V needs the 14B model -
+# Alibaba never released a smaller I2V variant). Confirmed live against
+# Kijai/WanVideo_comfy's actual file listing on HuggingFace (the same
+# repo ComfyUI-WanVideoWrapper's own docs point users to for compatible
+# checkpoints) - fp8_e4m3fn matches this app's existing T5-encoder
+# convention (prefer the non-scaled fp8 variant).
+WAN_I2V_DOWNLOAD_OPTIONS = {
+    "480p_fp8": {
+        "label": "Wan 2.1 I2V 14B - 480P (fp8, ~17GB, needs 12GB+ VRAM)",
+        "filename": "Wan2_1-I2V-14B-480P_fp8_e4m3fn.safetensors",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/"
+               "Wan2_1-I2V-14B-480P_fp8_e4m3fn.safetensors",
+        "size_gb": 16.99,
+    },
+    "720p_fp8": {
+        "label": "Wan 2.1 I2V 14B - 720P (fp8, ~17GB, needs 16GB+ VRAM)",
+        "filename": "Wan2_1-I2V-14B-720P_fp8_e4m3fn.safetensors",
+        "url": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/"
+               "Wan2_1-I2V-14B-720P_fp8_e4m3fn.safetensors",
+        "size_gb": 16.99,
+    },
+}
+
 
 def auto_sampler(style: str) -> tuple:
     """Pick the best sampler/scheduler for an art style."""
@@ -18939,6 +18963,70 @@ Click history arrows to replay generations
         return next((m for m in models if "i2v" in m.lower()
                     and "wan" in m.lower()), None)
 
+    def _download_wan_i2v_model(self, parent_win, key: str):
+        """v9.11: reuses _download_with_progress (built for the v9.10
+        self-update feature) to fetch a real Wan I2V checkpoint from
+        Kijai/WanVideo_comfy - a big, opt-in, explicitly-confirmed
+        download for machines with more VRAM than this dev machine's
+        6GB card, not something that ever runs silently."""
+        opt = WAN_I2V_DOWNLOAD_OPTIONS[key]
+        if self.busy:
+            messagebox.showinfo("Busy", "Finish or stop the current "
+                                "generation first.", parent=parent_win)
+            return
+        dest = Path(SHARED_MODELS_DIR) / "diffusion_models" / opt["filename"]
+        if not messagebox.askyesno(
+            "Download Wan I2V Model",
+            f"Download {opt['filename']}?\n\n"
+            f"Size: ~{opt['size_gb']:.1f} GB\n"
+            f"Destination: {dest}\n\n"
+            "This is a large download and needs significantly more "
+            "VRAM than this app's other Wan features to actually run "
+            "(see the label for the recommended minimum). It will not "
+            "be usable on a 6-8GB card. Continue?",
+            parent=parent_win):
+            return
+
+        win, body = self._new_toplevel("Downloading Wan I2V Model", 460, 150,
+                                       scrollable=False)
+        lbl = ttk.Label(body, text="Starting download...", font=self.font_body)
+        lbl.pack(pady=(16, 8), padx=16)
+        pbar = ttk.Progressbar(body, mode="determinate", maximum=100)
+        pbar.pack(fill="x", padx=16, pady=8)
+
+        def _progress(done, total):
+            pct = int(done * 100 / total) if total else 0
+            gb_done = done / 1e9
+            self.root.after(0, lambda: (
+                pbar.configure(value=pct),
+                lbl.configure(text=f"Downloading... {gb_done:.2f} / "
+                             f"{opt['size_gb']:.1f} GB")))
+
+        def _worker():
+            ok = _download_with_progress(opt["url"], dest,
+                                         on_progress=_progress, timeout=60.0)
+            def _finish():
+                win.destroy()
+                if ok:
+                    messagebox.showinfo(
+                        "Download Complete",
+                        f"{opt['filename']} downloaded.\n\n"
+                        "Restart ComfyUI so it picks up the new file, "
+                        "then reopen Wan Video Studio - Image-to-Video "
+                        "will be selectable once ComfyUI reports it.",
+                        parent=self.root)
+                    self.log(f"Wan I2V model downloaded: {opt['filename']}")
+                else:
+                    messagebox.showerror(
+                        "Download Failed",
+                        f"Could not download {opt['filename']}. "
+                        "Check your connection and disk space.",
+                        parent=self.root)
+                    self.log(f"Wan I2V model download failed: {opt['filename']}")
+            self.root.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def open_qwen_studio(self):
         """Standalone txt2img window for Qwen-Image-architecture
         checkpoints (One Obsession_Anima). Kept separate from the main
@@ -19170,6 +19258,25 @@ Click history arrows to replay generations
                     "not installed, only wan2.1_t2v_1.3B which is "
                     "T2V-only)", bg=self.PANEL, fg=self.FG_MUTED,
                     font=self.font_small).pack(side="left", padx=(8, 0))
+
+        if not i2v_model:
+            dl_row = tk.Frame(body, bg=self.PANEL)
+            dl_row.pack(fill="x", padx=12, pady=(0, 4))
+            dl_var = tk.StringVar(value=next(iter(WAN_I2V_DOWNLOAD_OPTIONS)))
+            ttk.Combobox(dl_row, textvariable=dl_var, state="readonly",
+                        values=[opt["label"] for opt in
+                               WAN_I2V_DOWNLOAD_OPTIONS.values()],
+                        width=48).pack(side="left")
+            label_to_key = {opt["label"]: k for k, opt in
+                            WAN_I2V_DOWNLOAD_OPTIONS.items()}
+            dl_var.set(next(iter(WAN_I2V_DOWNLOAD_OPTIONS.values()))["label"])
+
+            def do_download():
+                key = label_to_key.get(dl_var.get())
+                if key:
+                    self._download_wan_i2v_model(win, key)
+            ttk.Button(dl_row, text="📥 Download (for a more capable machine)",
+                      command=do_download).pack(side="left", padx=(8, 0))
 
         img_row = tk.Frame(body, bg=self.PANEL)
         img_path_var = tk.StringVar(value="")
