@@ -3651,14 +3651,25 @@ class ComfyClient:
             "6": {"class_type": "WanVideoVAELoader",
                   "inputs": {"model_name": vae_name, "precision": "bf16"}},
             "9": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+            # v9.11: a real photo/persona-portrait source is almost always
+            # much larger than the target generation size (confirmed live
+            # this session: a 1248x1824 source fed straight into VAE
+            # encode at full resolution caused a CUDA OOM on this 6GB
+            # card, even though the requested output was only 480x832).
+            # Resize to the target dims before encoding - matches every
+            # documented WanVideoWrapper I2V example.
+            "10": {"class_type": "ImageScale",
+                   "inputs": {"image": ["9", 0], "upscale_method": "lanczos",
+                              "width": width, "height": height,
+                              "crop": "center"}},
             "4": {"class_type": "WanVideoImageToVideoEncode",
                   "inputs": {"width": width, "height": height,
                              "num_frames": num_frames,
                              "noise_aug_strength": noise_aug_strength,
                              "start_latent_strength": start_latent_strength,
                              "end_latent_strength": end_latent_strength,
-                             "force_offload": True,
-                             "vae": ["6", 0], "start_image": ["9", 0]}},
+                             "force_offload": True, "tiled_vae": True,
+                             "vae": ["6", 0], "start_image": ["10", 0]}},
             "5": {"class_type": "WanVideoSampler",
                   "inputs": {"model": ["1", 0], "image_embeds": ["4", 0],
                              "steps": steps, "cfg": cfg, "shift": shift,
@@ -3667,7 +3678,7 @@ class ComfyClient:
                              "text_embeds": ["3", 0]}},
             "7": {"class_type": "WanVideoDecode",
                   "inputs": {"vae": ["6", 0], "samples": ["5", 0],
-                             "enable_vae_tiling": False,
+                             "enable_vae_tiling": True,
                              "tile_x": 272, "tile_y": 272,
                              "tile_stride_x": 144, "tile_stride_y": 128}},
             "8": {"class_type": "SaveAnimatedWEBP",
@@ -18912,6 +18923,22 @@ Click history arrows to replay generations
                     or "wan2.1_vae" in v.lower()), None)
         return model, t5, vae
 
+    def _wan_i2v_model(self):
+        """v9.11: separate from _wan_video_files - confirmed live this
+        session that the installed wan2.1_t2v_1.3B checkpoint is
+        text-to-video ONLY (WanVideoSampler explicitly rejects encoded
+        image conditioning against it: "T2V model detected, encoded
+        images only work with I2V models"). Real local I2V needs a
+        genuinely different checkpoint file (Wan 2.1's I2V release is
+        only shipped at 14B by Alibaba - not installed here, and likely
+        too large for 6GB VRAM regardless). Returns the model filename
+        if one is ever installed, else None - the Image-to-Video option
+        in the dialog is disabled with an honest explanation until then,
+        rather than letting a user hit this exact cryptic sampler error."""
+        models = self.client.get_diffusion_models()
+        return next((m for m in models if "i2v" in m.lower()
+                    and "wan" in m.lower()), None)
+
     def open_qwen_studio(self):
         """Standalone txt2img window for Qwen-Image-architecture
         checkpoints (One Obsession_Anima). Kept separate from the main
@@ -19124,13 +19151,25 @@ Click history arrows to replay generations
                      width=10, anchor="w").pack(side="left")
             return rr
 
-        # v9.11: T2V/I2V mode toggle
+        # v9.11: T2V/I2V mode toggle - only offer I2V if a real Wan I2V
+        # checkpoint is actually installed. Confirmed live this session
+        # the installed wan2.1_t2v_1.3B is text-to-video ONLY -
+        # WanVideoSampler hard-rejects encoded image conditioning
+        # against it, so offering the option without this gate would
+        # let a user hit that exact cryptic error every time.
+        i2v_model = self._wan_i2v_model()
         rr = frow("Mode")
         mode_var = tk.StringVar(value="Text-to-Video")
+        mode_values = (["Text-to-Video", "Image-to-Video"] if i2v_model
+                       else ["Text-to-Video"])
         mode_combo = ttk.Combobox(rr, textvariable=mode_var, state="readonly",
-                                  values=["Text-to-Video", "Image-to-Video"],
-                                  width=16)
+                                  values=mode_values, width=16)
         mode_combo.pack(side="left")
+        if not i2v_model:
+            tk.Label(rr, text="(I2V needs a real Wan I2V checkpoint - "
+                    "not installed, only wan2.1_t2v_1.3B which is "
+                    "T2V-only)", bg=self.PANEL, fg=self.FG_MUTED,
+                    font=self.font_small).pack(side="left", padx=(8, 0))
 
         img_row = tk.Frame(body, bg=self.PANEL)
         img_path_var = tk.StringVar(value="")
@@ -19276,9 +19315,10 @@ Click history arrows to replay generations
                 self.root.after(0, lambda: go_btn.configure(
                     state="normal", text="🎬 GENERATE VIDEO"))
             self.stop_flag = False
+            gen_model = i2v_model if is_i2v else model
             threading.Thread(
                 target=self._wan_video_worker,
-                args=(model, t5, vae, positive, negative, w, h,
+                args=(gen_model, t5, vae, positive, negative, w, h,
                       int(frames_var.get()), int(steps_var.get()),
                       float(cfg_var.get()), setv, done),
                 kwargs={"seed": seed, "scheduler": sched_var.get(),
@@ -19319,7 +19359,7 @@ Click history arrows to replay generations
                 mode_label = "Wan 2.1 T2V"
             set_status(f"Rendering ({mode_label}, this is slow on 6GB)...")
             entry = self._queue_and_wait(wf, on_tick=lambda: set_status(
-                f"Rendering... ({time.time()-t0:.0f}s)"), timeout_s=1200)
+                f"Rendering... ({time.time()-t0:.0f}s)"))
             outputs = entry.get("outputs", {}) if (entry and isinstance(entry, dict)) else {}
             clips = [x for o in outputs.values() for x in o.get("images", [])
                      if o.get("animated")]
