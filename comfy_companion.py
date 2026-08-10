@@ -3618,6 +3618,66 @@ class ComfyClient:
         }
         return wf
 
+    def build_wan_i2v_workflow(self, model_name, t5_name, vae_name, positive,
+                               negative, width, height, num_frames, steps,
+                               cfg, seed, image_name, *, shift=5.0,
+                               scheduler="unipc", fps=16,
+                               noise_aug_strength=0.0,
+                               start_latent_strength=1.0,
+                               end_latent_strength=1.0) -> dict:
+        """v9.11: native local image-to-video via WanVideoWrapper - a
+        sibling of build_wan_t2v_workflow, confirmed live against
+        /object_info this session that WanVideoWrapper now contributes
+        real nodes (it previously contributed zero). Swaps node "4"
+        (WanVideoEmptyEmbeds) for WanVideoImageToVideoEncode, which
+        takes the same width/height/num_frames plus a start_image and a
+        vae input and produces the same WANVIDIMAGE_EMBEDS output type
+        WanVideoSampler already consumes - every other node is
+        byte-identical to the T2V graph. image_name must already be
+        uploaded to the ComfyUI server (via _upload_ref)."""
+        negative = f"{negative}, {safety_floor_for_build()}" if negative else safety_floor_for_build()
+        num_frames = ((num_frames - 1) // 4) * 4 + 1  # same step=4 constraint as T2V
+        wf = {
+            "1": {"class_type": "WanVideoModelLoader",
+                  "inputs": {"model": model_name, "base_precision": "bf16",
+                             "quantization": "disabled",
+                             "load_device": "offload_device"}},
+            "2": {"class_type": "LoadWanVideoT5TextEncoder",
+                  "inputs": {"model_name": t5_name, "precision": "bf16"}},
+            "3": {"class_type": "WanVideoTextEncode",
+                  "inputs": {"positive_prompt": positive,
+                             "negative_prompt": negative,
+                             "t5": ["2", 0]}},
+            "6": {"class_type": "WanVideoVAELoader",
+                  "inputs": {"model_name": vae_name, "precision": "bf16"}},
+            "9": {"class_type": "LoadImage", "inputs": {"image": image_name}},
+            "4": {"class_type": "WanVideoImageToVideoEncode",
+                  "inputs": {"width": width, "height": height,
+                             "num_frames": num_frames,
+                             "noise_aug_strength": noise_aug_strength,
+                             "start_latent_strength": start_latent_strength,
+                             "end_latent_strength": end_latent_strength,
+                             "force_offload": True,
+                             "vae": ["6", 0], "start_image": ["9", 0]}},
+            "5": {"class_type": "WanVideoSampler",
+                  "inputs": {"model": ["1", 0], "image_embeds": ["4", 0],
+                             "steps": steps, "cfg": cfg, "shift": shift,
+                             "seed": seed, "scheduler": scheduler,
+                             "force_offload": True, "riflex_freq_index": 0,
+                             "text_embeds": ["3", 0]}},
+            "7": {"class_type": "WanVideoDecode",
+                  "inputs": {"vae": ["6", 0], "samples": ["5", 0],
+                             "enable_vae_tiling": False,
+                             "tile_x": 272, "tile_y": 272,
+                             "tile_stride_x": 144, "tile_stride_y": 128}},
+            "8": {"class_type": "SaveAnimatedWEBP",
+                  "inputs": {"images": ["7", 0],
+                             "filename_prefix": "companion_wan_i2v",
+                             "fps": fps, "lossless": False, "quality": 85,
+                             "method": "default"}},
+        }
+        return wf
+
     def build_txt2img_workflow(self, ckpt, positive, negative, width, height,
                                batch_size, steps, cfg, sampler, scheduler, seed,
                                upscale_model=None, lora=None,
@@ -19034,16 +19094,16 @@ Click history arrows to replay generations
         (Wan 2.1 1.3B). v10.3: kept separate from build_animatediff_workflow's
         SD1.5 pipeline - genuinely different architecture/node graph, same
         "different architecture, separate window" precedent as Qwen-Image
-        Studio."""
+        Studio. v9.11: dialog parity (seed/sampler-scheduler/persona) plus
+        an image-to-video mode - build_wan_i2v_workflow confirmed live
+        against /object_info this session, WanVideoWrapper now contributes
+        real nodes where it previously contributed zero."""
         model, t5, vae = (self.wan_files if hasattr(self, "wan_files")
                           else (None, None, None))
-        win = tk.Toplevel(self.root)
-        win.title("Wan Video Studio (text-to-video)")
-        self._clamp_window(win, 580, 480)
-        win.configure(bg=self.PANEL)
+        win, body = self._new_toplevel("Wan Video Studio", 600, 620)
 
         if not (model and t5 and vae):
-            tk.Label(win, text="Wan 2.1 model files not found.\n"
+            tk.Label(body, text="Wan 2.1 model files not found.\n"
                      "Expected wan2.1_t2v_1.3B*.safetensors in "
                      "diffusion_models/, a umt5-xxl encoder (non-scaled fp8 "
                      "or bf16) in text_encoders/, and wan_2.1_vae.safetensors "
@@ -19053,34 +19113,79 @@ Click history arrows to replay generations
             self.log("Wan Video Studio: model files not found")
             return
 
-        tk.Label(win, text=f"Model: {model}", bg=self.PANEL,
+        tk.Label(body, text=f"Model: {model}", bg=self.PANEL,
                  fg=self.FG_MUTED, font=self.font_small).pack(
             anchor="w", padx=12, pady=(10, 0))
 
         def frow(label):
-            rr = tk.Frame(win, bg=self.PANEL)
+            rr = tk.Frame(body, bg=self.PANEL)
             rr.pack(fill="x", padx=12, pady=3)
             tk.Label(rr, text=label, bg=self.PANEL, fg=self.FG,
                      width=10, anchor="w").pack(side="left")
             return rr
 
-        tk.Label(win, text="Prompt:", bg=self.PANEL, fg=self.ACCENT,
+        # v9.11: T2V/I2V mode toggle
+        rr = frow("Mode")
+        mode_var = tk.StringVar(value="Text-to-Video")
+        mode_combo = ttk.Combobox(rr, textvariable=mode_var, state="readonly",
+                                  values=["Text-to-Video", "Image-to-Video"],
+                                  width=16)
+        mode_combo.pack(side="left")
+
+        img_row = tk.Frame(body, bg=self.PANEL)
+        img_path_var = tk.StringVar(value="")
+        tk.Label(img_row, text="Source Image", bg=self.PANEL, fg=self.FG,
+                 width=10, anchor="w").pack(side="left")
+        tk.Entry(img_row, textvariable=img_path_var, bg=self.INPUT_BG,
+                 fg=self.FG).pack(side="left", fill="x", expand=True)
+
+        def browse_img():
+            f = filedialog.askopenfilename(
+                title="Pick a source image",
+                filetypes=[("Images", "*.png *.jpg *.jpeg *.webp")])
+            if f:
+                img_path_var.set(f)
+        ttk.Button(img_row, text="Browse...", command=browse_img).pack(
+            side="left", padx=(6, 0))
+
+        def on_mode_change(*_):
+            if mode_var.get() == "Image-to-Video":
+                img_row.pack(fill="x", padx=12, pady=3, after=rr)
+            else:
+                img_row.pack_forget()
+        mode_combo.bind("<<ComboboxSelected>>", on_mode_change)
+
+        tk.Label(body, text="Prompt:", bg=self.PANEL, fg=self.ACCENT,
                  font=self.font_body_bold).pack(anchor="w", padx=12,
                                                     pady=(10, 2))
-        pos_text = tk.Text(win, height=3, bg=self.INPUT_BG, fg=self.FG,
+        pos_text = tk.Text(body, height=3, bg=self.INPUT_BG, fg=self.FG,
                            wrap="word", insertbackground=self.FG,
                            borderwidth=0)
         pos_text.pack(fill="x", padx=12)
         pos_text.insert("1.0", "an anime girl walking through a moonlit "
                         "garden, cinematic, high quality")
 
-        tk.Label(win, text="Negative:", bg=self.PANEL, fg=self.FG_MUTED,
+        tk.Label(body, text="Negative:", bg=self.PANEL, fg=self.FG_MUTED,
                  font=self.font_small).pack(anchor="w", padx=12, pady=(6, 0))
-        neg_text = tk.Text(win, height=2, bg=self.INPUT_BG, fg=self.FG,
+        neg_text = tk.Text(body, height=2, bg=self.INPUT_BG, fg=self.FG,
                            wrap="word", insertbackground=self.FG,
                            borderwidth=0)
         neg_text.pack(fill="x", padx=12)
         neg_text.insert("1.0", "blurry, low quality, distorted, watermark")
+
+        # v9.11: persona picker - text-only prompt-blend, NOT a face-lock.
+        # Wan's IPAdapter compatibility is unconfirmed; stated plainly so
+        # this doesn't imply more consistency than it delivers, matching
+        # Cinematic Scene Studio's own precedent.
+        rr = frow("Persona")
+        persona_names = ["(none)"] + [p.get("name", "?")
+                                      for p in self.visible_personas()]
+        persona_var = tk.StringVar(value="(none)")
+        ttk.Combobox(rr, textvariable=persona_var, state="readonly",
+                     values=persona_names, width=24).pack(side="left")
+        tk.Label(rr, text="(prompt blend only, not a face-lock)",
+                 bg=self.PANEL, fg=self.FG_MUTED,
+                 font=self.font_small).pack(side="left", padx=(8, 0))
 
         rr = frow("Size")
         size_var = tk.StringVar(value="480x832")
@@ -19103,7 +19208,22 @@ Click history arrows to replay generations
         ttk.Spinbox(rr, textvariable=cfg_var, from_=1.0, to=15.0,
                     increment=0.5, width=6).pack(side="left")
 
-        status = tk.Label(win, text="6GB VRAM: keep frames <=33 and steps "
+        # v9.11: seed + sampler/scheduler - previously missing entirely,
+        # every generation used a fresh random seed with no way to pin one.
+        rr = frow("Seed")
+        seed_var = tk.StringVar(value="random")
+        ttk.Entry(rr, textvariable=seed_var, width=16).pack(side="left")
+        tk.Label(rr, text="('random' or an integer)", bg=self.PANEL,
+                 fg=self.FG_MUTED, font=self.font_small).pack(
+            side="left", padx=(8, 0))
+
+        rr = frow("Scheduler")
+        sched_var = tk.StringVar(value="unipc")
+        ttk.Combobox(rr, textvariable=sched_var, state="readonly",
+                     values=["unipc", "dpm++", "euler", "euler_a", "dpm2"],
+                     width=14).pack(side="left")
+
+        status = tk.Label(body, text="6GB VRAM: keep frames <=33 and steps "
                           "<=20 unless you've confirmed more fits. A 33-frame "
                           "clip took ~6.5 min on this card during testing.",
                           bg=self.PANEL, fg=self.FG_MUTED, wraplength=540,
@@ -19124,8 +19244,29 @@ Click history arrows to replay generations
                 messagebox.showerror("Offline", "ComfyUI not connected.",
                                      parent=win)
                 return
+            is_i2v = mode_var.get() == "Image-to-Video"
+            src_image_path = None
+            if is_i2v:
+                p = img_path_var.get().strip()
+                if not p or not Path(p).exists():
+                    messagebox.showinfo(
+                        "No source image",
+                        "Pick a source image for Image-to-Video mode first.",
+                        parent=win)
+                    return
+                src_image_path = Path(p)
             negative = neg_text.get("1.0", "end").strip()
             w, h = (int(x) for x in size_var.get().split("x"))
+            seed_txt = seed_var.get().strip()
+            seed = (random.randint(0, 2**48) if seed_txt.lower() == "random"
+                    else int(seed_txt) if seed_txt.isdigit()
+                    else random.randint(0, 2**48))
+            persona_name = persona_var.get()
+            if persona_name != "(none)":
+                persona = next((p for p in self.visible_personas()
+                               if p.get("name") == persona_name), None)
+                if persona and persona.get("visual_details"):
+                    positive = f"{positive}, {persona['visual_details']}"
             go_btn.configure(state="disabled", text="Generating...")
 
             def setv(t):
@@ -19140,27 +19281,43 @@ Click history arrows to replay generations
                 args=(model, t5, vae, positive, negative, w, h,
                       int(frames_var.get()), int(steps_var.get()),
                       float(cfg_var.get()), setv, done),
+                kwargs={"seed": seed, "scheduler": sched_var.get(),
+                       "src_image_path": src_image_path},
                 daemon=True).start()
 
-        go_btn = ttk.Button(win, text="🎬 GENERATE VIDEO", command=start)
+        go_btn = ttk.Button(body, text="🎬 GENERATE VIDEO", command=start)
         go_btn.pack(pady=8)
         self.log("Opened Wan Video Studio")
 
     def _wan_video_worker(self, model, t5, vae, positive, negative,
                           width, height, num_frames, steps, cfg,
-                          set_status, done_cb):
+                          set_status, done_cb, *, seed=None,
+                          scheduler="unipc", src_image_path=None):
         self.busy = True
         t0 = time.time()
         try:
-            seed = random.randint(0, 2**48)
+            if seed is None:
+                seed = random.randint(0, 2**48)
             set_status("Building workflow...")
-            wf = self.client.build_wan_t2v_workflow(
-                model_name=model, t5_name=t5, vae_name=vae,
-                positive=positive, negative=negative, width=width,
-                height=height, num_frames=num_frames, steps=steps,
-                cfg=cfg, seed=seed)
             self.quotes.release_vram()
-            set_status("Rendering (Wan 2.1 T2V, this is slow on 6GB)...")
+            if src_image_path is not None:
+                set_status("Uploading source image...")
+                image_name = self._upload_ref(src_image_path)
+                wf = self.client.build_wan_i2v_workflow(
+                    model_name=model, t5_name=t5, vae_name=vae,
+                    positive=positive, negative=negative, width=width,
+                    height=height, num_frames=num_frames, steps=steps,
+                    cfg=cfg, seed=seed, image_name=image_name,
+                    scheduler=scheduler)
+                mode_label = "Wan 2.1 I2V"
+            else:
+                wf = self.client.build_wan_t2v_workflow(
+                    model_name=model, t5_name=t5, vae_name=vae,
+                    positive=positive, negative=negative, width=width,
+                    height=height, num_frames=num_frames, steps=steps,
+                    cfg=cfg, seed=seed, scheduler=scheduler)
+                mode_label = "Wan 2.1 T2V"
+            set_status(f"Rendering ({mode_label}, this is slow on 6GB)...")
             entry = self._queue_and_wait(wf, on_tick=lambda: set_status(
                 f"Rendering... ({time.time()-t0:.0f}s)"), timeout_s=1200)
             outputs = entry.get("outputs", {}) if (entry and isinstance(entry, dict)) else {}
@@ -19177,13 +19334,15 @@ Click history arrows to replay generations
             out_dir = self.output_dir / "wan_video"
             out_dir.mkdir(parents=True, exist_ok=True)
             stamp = f"3klipz_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            out_path = out_dir / f"{stamp}_wan.webp"
+            suffix = "wan_i2v" if src_image_path is not None else "wan"
+            out_path = out_dir / f"{stamp}_{suffix}.webp"
             out_path.write_bytes(raw)
             meta = {"prompt": positive, "negative": negative, "seed": seed,
                     "width": width, "height": height,
                     "num_frames": num_frames, "steps": steps, "cfg": cfg,
-                    "model": model, "t5": t5, "vae": vae,
-                    "architecture": "wan_video"}
+                    "scheduler": scheduler, "model": model, "t5": t5,
+                    "vae": vae, "architecture": mode_label,
+                    "source_image": str(src_image_path) if src_image_path else None}
             safe_json_save(out_path.with_suffix(".json"), meta)
             elapsed = time.time() - t0
             set_status(f"DONE ({elapsed:.0f}s) -> {out_path.name}")
