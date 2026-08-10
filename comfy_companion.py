@@ -220,6 +220,7 @@ import random
 import re
 import subprocess
 import sys
+import tempfile
 IS_KIDS_MODE = "Kids" in sys.executable or "Kids" in sys.argv[0]
 import threading
 
@@ -286,7 +287,7 @@ except ImportError:
 # Tk's default "tk" title. Everything that names the product now derives
 # from the three constants below; nothing hardcodes a name or version.
 APP_NAME = "3klipz Studio"
-APP_VERSION = "9.8"
+APP_VERSION = "9.10"
 APP_EDITION = "Kids" if IS_KIDS_MODE else "Pro"
 APP_TITLE = f"{APP_NAME} {APP_EDITION}"
 # v10.4: fill this in with the real "owner/repo" once published on GitHub -
@@ -3168,6 +3169,36 @@ class CivitaiClient:
             # later pick up as if it were a real, complete file.
             filepath.unlink(missing_ok=True)
             return False
+
+
+def _download_with_progress(url: str, dest_path: Path, on_progress=None,
+                            timeout: float = 30.0) -> bool:
+    """v9.10: chunked download with real progress + timeout, used by the
+    self-update flow. on_progress(bytes_done, total_bytes) fires per
+    chunk (total_bytes is 0 if the server omits Content-Length). Writes
+    to a .part temp file and renames to dest_path only on full success -
+    a failure never leaves a half-written file at the real destination."""
+    tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": APP_NAME})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            total = int(resp.headers.get("Content-Length", 0) or 0)
+            done = 0
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(tmp_path, "wb") as f:
+                while True:
+                    chunk = resp.read(8192)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    done += len(chunk)
+                    if on_progress:
+                        on_progress(done, total)
+        tmp_path.replace(dest_path)
+        return True
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        return False
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -8807,6 +8838,10 @@ class CompanionApp:
             latest_tag = str(data.get("tag_name", "")).lstrip("vV").strip()
             html_url = data.get("html_url", "")
             body = str(data.get("body", "")).strip()
+            assets = data.get("assets", []) or []
+            exe_name = Path(sys.executable).name
+            matching_asset = next(
+                (a for a in assets if a.get("name") == exe_name), None)
             if not latest_tag or not html_url:
                 if manual:
                     self.root.after(0, lambda: messagebox.showinfo(
@@ -8840,11 +8875,18 @@ class CompanionApp:
                       f"(you have v{APP_VERSION})\n")
                 if notes:
                     msg += f"\nWhat's new:\n{notes}\n"
-                msg += "\nOpen the download page now?"
-                if messagebox.askyesno("Update Available", msg,
-                                       parent=self.root):
-                    import webbrowser
-                    webbrowser.open(html_url)
+                if matching_asset:
+                    msg += "\nDownload and install it now?"
+                    if messagebox.askyesno("Update Available", msg,
+                                           parent=self.root):
+                        self._start_self_update(matching_asset["browser_download_url"],
+                                                exe_name)
+                else:
+                    msg += "\nOpen the download page now?"
+                    if messagebox.askyesno("Update Available", msg,
+                                           parent=self.root):
+                        import webbrowser
+                        webbrowser.open(html_url)
             self.root.after(0, _notify)
         except Exception as e:
             self.log(f"Update check skipped: {e}")
@@ -8852,6 +8894,76 @@ class CompanionApp:
                 self.root.after(0, lambda: messagebox.showerror(
                     "Check for Updates", f"Update check failed: {e}",
                     parent=self.root))
+
+    def _start_self_update(self, asset_url: str, exe_name: str):
+        """v9.10: downloads the matching release exe with a progress
+        dialog, writes a temp relauncher .bat that waits for this
+        process to exit then swaps the exe and restarts it, launches
+        that .bat, and hard-exits. The OLD exe is never touched until
+        the download AND the move both succeed - a failure at any
+        point just leaves the app running unchanged, never bricked."""
+        if self.busy:
+            messagebox.showinfo("Update", "Finish or stop the current "
+                                "generation before updating.", parent=self.root)
+            return
+        win, body = self._new_toplevel("Downloading Update", 420, 150,
+                                       scrollable=False)
+        lbl = ttk.Label(body, text="Starting download...", font=self.font_body)
+        lbl.pack(pady=(16, 8), padx=16)
+        pbar = ttk.Progressbar(body, mode="determinate", maximum=100)
+        pbar.pack(fill="x", padx=16, pady=8)
+
+        def _progress(done, total):
+            pct = int(done * 100 / total) if total else 0
+            mb_done, mb_total = done / 1e6, total / 1e6
+            self.root.after(0, lambda: (
+                pbar.configure(value=pct),
+                lbl.configure(text=f"Downloading... {mb_done:.1f} / "
+                             f"{mb_total:.1f} MB" if total else
+                             f"Downloading... {mb_done:.1f} MB")))
+
+        def _worker():
+            dest = app_dir() / "update_download" / exe_name
+            ok = _download_with_progress(asset_url, dest, on_progress=_progress,
+                                         timeout=60.0)
+            if not ok:
+                self.root.after(0, lambda: (
+                    win.destroy(),
+                    messagebox.showerror("Update Failed",
+                        "Download failed. The current version is untouched.",
+                        parent=self.root)))
+                return
+            target_path = Path(sys.executable)
+            bat_path = Path(tempfile.gettempdir()) / f"_3klipz_update_{os.getpid()}.bat"
+            bat_contents = (
+                "@echo off\r\n"
+                "timeout /t 2 /nobreak >nul\r\n"
+                f'move /y "{dest}" "{target_path}"\r\n'
+                "if errorlevel 1 (\r\n"
+                "  exit /b 1\r\n"
+                ")\r\n"
+                f'start "" "{target_path}"\r\n'
+                'del "%~f0"\r\n'
+            )
+            bat_path.write_text(bat_contents, encoding="utf-8")
+
+            def _finish():
+                lbl.configure(text="Restarting...")
+                self.root.after(300, lambda: self._launch_relauncher_and_exit(bat_path))
+            self.root.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _launch_relauncher_and_exit(self, bat_path: Path):
+        try:
+            subprocess.Popen(["cmd.exe", "/c", str(bat_path)],
+                             creationflags=subprocess.CREATE_NO_WINDOW,
+                             close_fds=True)
+        except Exception as e:
+            self.log(f"Update relauncher failed to start: {e}")
+            return
+        self.root.destroy()
+        os._exit(0)
 
     def _show_first_run_welcome(self, hw: dict, rec: dict):
         """v9.8: the hardware auto-tune above ran with silent=True (by
