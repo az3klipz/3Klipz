@@ -4048,6 +4048,53 @@ class ComfyClient:
                              "images": ["8", 0]}},
         }
 
+    def build_krea_workflow(self, unet_name, clip_l_name, t5_name, vae_name,
+                            positive, negative, width, height, steps,
+                            seed, guidance=3.5, sampler="euler",
+                            scheduler="simple") -> dict:
+        """v9.11: Krea (FLUX-Krea-dev architecture) txt2img via the
+        standard, well-documented ComfyUI FLUX graph, adapted for a GGUF-
+        quantized UNET (city96/ComfyUI-GGUF's UnetLoaderGGUF instead of
+        UNETLoader - the gated official fp16 checkpoint needs a
+        HuggingFace login this app has no mechanism for, so a public,
+        unauthenticated GGUF quantization is used instead - see
+        KREA_DOWNLOAD_OPTIONS). NOT live-verified against /object_info
+        this session (ComfyUI was offline) - confirm UnetLoaderGGUF's
+        exact class name/params and FluxGuidance's presence live before
+        first real use, same discipline as every other new node graph in
+        this app. FLUX needs two text encoders (CLIP-L + T5, DualCLIPLoader)
+        and a guidance-scale node (FluxGuidance) - genuinely different
+        from SDXL's single CLIP + plain CFG."""
+        return {
+            "4": {"class_type": "UnetLoaderGGUF",
+                  "inputs": {"unet_name": unet_name}},
+            "40": {"class_type": "DualCLIPLoader",
+                   "inputs": {"clip_name1": clip_l_name,
+                              "clip_name2": t5_name, "type": "flux"}},
+            "41": {"class_type": "VAELoader",
+                   "inputs": {"vae_name": vae_name}},
+            "5": {"class_type": "EmptySD3LatentImage",
+                  "inputs": {"width": width, "height": height,
+                             "batch_size": 1}},
+            "6": {"class_type": "CLIPTextEncode",
+                  "inputs": {"text": positive, "clip": ["40", 0]}},
+            "60": {"class_type": "FluxGuidance",
+                   "inputs": {"conditioning": ["6", 0], "guidance": guidance}},
+            "7": {"class_type": "CLIPTextEncode",
+                  "inputs": {"text": negative, "clip": ["40", 0]}},
+            "3": {"class_type": "KSampler",
+                  "inputs": {"seed": seed, "steps": steps, "cfg": 1.0,
+                             "sampler_name": sampler, "scheduler": scheduler,
+                             "denoise": 1.0, "model": ["4", 0],
+                             "positive": ["60", 0], "negative": ["7", 0],
+                             "latent_image": ["5", 0]}},
+            "8": {"class_type": "VAEDecode",
+                  "inputs": {"samples": ["3", 0], "vae": ["41", 0]}},
+            "9": {"class_type": "SaveImage",
+                  "inputs": {"filename_prefix": "companion_krea",
+                             "images": ["8", 0]}},
+        }
+
     def build_img2img_workflow(self, ckpt, positive, negative, image_name,
                                denoise, steps, cfg, sampler, scheduler, seed,
                                lora=None, lora_strength=0.8) -> dict:
@@ -7797,6 +7844,73 @@ SHARED_MODELS_DIR = (r"C:\Users\phase\AppData\Local\Comfy-Desktop"
 # repo ComfyUI-WanVideoWrapper's own docs point users to for compatible
 # checkpoints) - fp8_e4m3fn matches this app's existing T5-encoder
 # convention (prefer the non-scaled fp8 variant).
+# v9.11: small, real upscale model for Maximum Mode's tiled-upscale
+# stage - models/upscale_models/ is empty by default, so tiled upscale
+# reports unavailable until one exists. Confirmed live via HEAD request
+# this session (Kim2091/UltraSharp, the model author's own HF repo) -
+# real file, ~66.96MB, matches the well-known 4x-UltraSharp release.
+UPSCALE_MODEL_DOWNLOAD = {
+    "filename": "4x-UltraSharp.pth",
+    "url": "https://huggingface.co/Kim2091/UltraSharp/resolve/main/4x-UltraSharp.pth",
+    "size_mb": 66.96,
+}
+
+# v9.11: Krea (FLUX-Krea-dev) for more capable machines. The official
+# black-forest-labs/FLUX.1-krea-dev repo requires a HuggingFace login
+# (confirmed live this session: HTTP 401 on an unauthenticated request)
+# - this app has no auth mechanism, so that repo can't be used. Instead
+# uses QuantStack's public, unauthenticated GGUF quantizations (same
+# model, no login wall) - genuinely better fit for "more compatible
+# machines" than the 24GB fp16 original anyway, since GGUF quant levels
+# scale down to fit smaller VRAM. clip_l/t5xxl/vae are the same public
+# files already used by any FLUX-family model, confirmed live via HEAD
+# request. Needs city96/ComfyUI-GGUF installed for UnetLoaderGGUF - not
+# verified live this session (ComfyUI was offline), state that plainly.
+KREA_SHARED_FILES = {
+    "clip_l": {
+        "filename": "clip_l.safetensors",
+        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/"
+               "resolve/main/clip_l.safetensors",
+        "size_gb": 0.246, "subfolder": "text_encoders",
+    },
+    "t5xxl": {
+        "filename": "t5xxl_fp8_e4m3fn.safetensors",
+        "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/"
+               "resolve/main/t5xxl_fp8_e4m3fn.safetensors",
+        "size_gb": 4.9, "subfolder": "text_encoders",
+    },
+    "vae": {
+        "filename": "ae.safetensors",
+        "url": "https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/"
+               "resolve/main/split_files/vae/ae.safetensors",
+        "size_gb": 0.335, "subfolder": "vae",
+    },
+}
+KREA_DOWNLOAD_OPTIONS = {
+    "q4_k_m": {
+        "label": "Krea (FLUX) Q4_K_M - ~12.4GB total, needs 10GB+ VRAM",
+        "filename": "flux1-krea-dev-Q4_K_M.gguf",
+        "url": "https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/"
+               "resolve/main/flux1-krea-dev-Q4_K_M.gguf",
+        "size_gb": 6.93, "subfolder": "diffusion_models",
+    },
+    "q5_k_m": {
+        "label": "Krea (FLUX) Q5_K_M - ~13.9GB total, needs 12GB+ VRAM",
+        "filename": "flux1-krea-dev-Q5_K_M.gguf",
+        "url": "https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/"
+               "resolve/main/flux1-krea-dev-Q5_K_M.gguf",
+        "size_gb": 8.4, "subfolder": "diffusion_models",
+    },
+    "q8_0": {
+        "label": "Krea (FLUX) Q8_0 - ~18.2GB total, needs 16GB+ VRAM "
+                "(best quality)",
+        "filename": "flux1-krea-dev-Q8_0.gguf",
+        "url": "https://huggingface.co/QuantStack/FLUX.1-Krea-dev-GGUF/"
+               "resolve/main/flux1-krea-dev-Q8_0.gguf",
+        "size_gb": 12.71, "subfolder": "diffusion_models",
+    },
+}
+
 WAN_I2V_DOWNLOAD_OPTIONS = {
     "480p_fp8": {
         "label": "Wan 2.1 I2V 14B - 480P (fp8, ~17GB, needs 12GB+ VRAM)",
@@ -9636,6 +9750,11 @@ class CompanionApp:
         tier_frame.pack(fill="x", pady=(0, 6))
         tk.Label(tier_frame, text="Quality:", bg=self.PANEL, fg=self.ACCENT, font=self.font_small_bold).pack(side="left", padx=(0, 4))
 
+        # v9.11: Maximum Mode - True once "💎 Maximum" is selected, checked
+        # by _generate_worker after the base pass to chain
+        # _run_maximum_mode_finishing (tiled upscale + face detailer).
+        self.maximum_chain_var = tk.BooleanVar(value=False)
+
         def _apply_quality_tier(tier):
             if tier == "speed":
                 self.steps_var.set(8); self.cfg_var.set(1.5)
@@ -9652,7 +9771,18 @@ class CompanionApp:
                 self.sampler_var.set("dpmpp_3m_sde"); self.sched_var.set("exponential")
                 self.freeu_var.set(True); self.pag_var.set(True); self.sag_var.set(True)
                 self.fidelity_trio_var.set(True)
-                self.log("💎 Quality Tier: MAXIMUM (35 steps + FreeU + PAG + SAG — Best quality)")
+                self.hires_var.set(True)
+                # v9.11: "Maximum" now also chains tiled upscale + face
+                # detailer after the base pass (_run_maximum_mode_finishing),
+                # not just better base-pass settings - genuinely slower per
+                # image, so this note is shown once per selection.
+                self.maximum_chain_var.set(True)
+                self.log("💎 Quality Tier: MAXIMUM (35 steps + FreeU + PAG + "
+                         "SAG + hires-fix, then tiled upscale + face "
+                         "detailer chained after — significantly slower "
+                         "per image)")
+            else:
+                self.maximum_chain_var.set(False)
             self._update_quality_score()
 
         ttk.Button(tier_frame, text="⚡ Speed", width=9,
@@ -9661,6 +9791,13 @@ class CompanionApp:
                    command=lambda: _apply_quality_tier("balanced")).pack(side="left", padx=2)
         ttk.Button(tier_frame, text="💎 Maximum", width=10,
                    command=lambda: _apply_quality_tier("max")).pack(side="left", padx=2)
+        # v9.11: shown/hidden by _probe_capabilities once caps["tiled_upscale"]
+        # is known (self.upscale_models is empty at build time, before the
+        # first connect - a static check here would be stale after connect).
+        self.enable_upscale_btn = ttk.Button(
+            tier_frame, text="📥 Enable Tiled Upscale (~67MB)",
+            command=lambda: self._download_upscale_model())
+        self.enable_upscale_btn.pack(side="left", padx=(8, 2))
 
         self.row_mode = row(tab_generate, "Mode")
         self.mode_var = tk.StringVar(value="Variant")
@@ -18963,6 +19100,67 @@ Click history arrows to replay generations
         return next((m for m in models if "i2v" in m.lower()
                     and "wan" in m.lower()), None)
 
+    def _download_upscale_model(self, parent_win=None):
+        """v9.11: one-click download of a small real upscale model
+        (UPSCALE_MODEL_DOWNLOAD) so Maximum Mode's tiled-upscale stage
+        actually has something to load - models/upscale_models/ is
+        empty by default. Much smaller than the Wan I2V/Krea downloads
+        (~67MB), so a single confirm + simple progress dialog is enough,
+        no multi-file complexity needed."""
+        parent_win = parent_win or self.root
+        opt = UPSCALE_MODEL_DOWNLOAD
+        if self.busy:
+            messagebox.showinfo("Busy", "Finish or stop the current "
+                                "generation first.", parent=parent_win)
+            return
+        dest = Path(SHARED_MODELS_DIR) / "upscale_models" / opt["filename"]
+        if not messagebox.askyesno(
+            "Download Upscale Model",
+            f"Download {opt['filename']}?\n\n"
+            f"Size: ~{opt['size_mb']:.1f} MB\n"
+            f"Destination: {dest}\n\n"
+            "Enables Maximum Mode's tiled-upscale stage. Continue?",
+            parent=parent_win):
+            return
+
+        win, body = self._new_toplevel("Downloading Upscale Model", 420, 130,
+                                       scrollable=False)
+        lbl = ttk.Label(body, text="Starting download...", font=self.font_body)
+        lbl.pack(pady=(16, 8), padx=16)
+        pbar = ttk.Progressbar(body, mode="determinate", maximum=100)
+        pbar.pack(fill="x", padx=16, pady=8)
+
+        def _progress(done, total):
+            pct = int(done * 100 / total) if total else 0
+            mb_done = done / 1e6
+            self.root.after(0, lambda: (
+                pbar.configure(value=pct),
+                lbl.configure(text=f"Downloading... {mb_done:.1f} MB")))
+
+        def _worker():
+            ok = _download_with_progress(opt["url"], dest,
+                                         on_progress=_progress, timeout=60.0)
+            def _finish():
+                win.destroy()
+                if ok:
+                    messagebox.showinfo(
+                        "Download Complete",
+                        f"{opt['filename']} downloaded. Restart ComfyUI "
+                        "so it picks up the new file - Maximum Mode's "
+                        "tiled upscale stage will then run automatically.",
+                        parent=self.root)
+                    self.log(f"Upscale model downloaded: {opt['filename']}")
+                else:
+                    messagebox.showerror(
+                        "Download Failed",
+                        f"Could not download {opt['filename']}. "
+                        "Check your connection and disk space.",
+                        parent=self.root)
+                    self.log(f"Upscale model download failed: {opt['filename']}")
+            self.root.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _download_wan_i2v_model(self, parent_win, key: str):
         """v9.11: reuses _download_with_progress (built for the v9.10
         self-update feature) to fetch a real Wan I2V checkpoint from
@@ -19026,6 +19224,283 @@ Click history arrows to replay generations
             self.root.after(0, _finish)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _krea_files(self):
+        """v9.11: returns (unet, clip_l, t5, vae) filenames if a Krea GGUF
+        checkpoint + all 3 shared FLUX support files are present, else
+        (None, None, None, None). Live query, same convention as
+        _wan_video_files."""
+        models = self.client.get_diffusion_models()
+        unet = next((m for m in models if "krea" in m.lower()
+                    and m.lower().endswith(".gguf")), None)
+        t5s = self.client.get_text_encoders()
+        clip_l = next((t for t in t5s if t == KREA_SHARED_FILES["clip_l"]["filename"]), None)
+        t5 = next((t for t in t5s if t == KREA_SHARED_FILES["t5xxl"]["filename"]), None)
+        vaes = self.client.get_vae_files()
+        vae = next((v for v in vaes if v == KREA_SHARED_FILES["vae"]["filename"]), None)
+        if unet and clip_l and t5 and vae:
+            return unet, clip_l, t5, vae
+        return None, None, None, None
+
+    def _download_krea_files(self, parent_win, quant_key: str):
+        """v9.11: sequential multi-file download (Krea GGUF diffusion
+        model + the 3 shared FLUX support files, each possibly already
+        present from a prior download or another FLUX feature), single
+        combined progress dialog. Reuses _download_with_progress per
+        file, same as every other download in this app - never a
+        silent/automatic download, one explicit confirm naming every
+        file, every size, and the combined total up front."""
+        opt = KREA_DOWNLOAD_OPTIONS[quant_key]
+        if self.busy:
+            messagebox.showinfo("Busy", "Finish or stop the current "
+                                "generation first.", parent=parent_win)
+            return
+        files = [opt] + list(KREA_SHARED_FILES.values())
+        total_gb = sum(f["size_gb"] for f in files)
+        listing = "\n".join(f"  - {f['filename']} (~{f['size_gb']:.2f} GB)"
+                            for f in files)
+        if not messagebox.askyesno(
+            "Download Krea (FLUX) Model Set",
+            f"Download {len(files)} files, ~{total_gb:.1f} GB total?\n\n"
+            f"{listing}\n\n"
+            "This needs a real ComfyUI-GGUF custom node pack "
+            "(city96/ComfyUI-GGUF) for UnetLoaderGGUF, not verified on "
+            "this server - install it if generation later fails to "
+            "find that node.\n\n"
+            "This is a large download and needs significantly more "
+            "VRAM than this card has (see the label for the "
+            "recommended minimum). Continue?",
+            parent=parent_win):
+            return
+
+        win, body = self._new_toplevel("Downloading Krea Model Set", 460, 150,
+                                       scrollable=False)
+        lbl = ttk.Label(body, text="Starting download...", font=self.font_body)
+        lbl.pack(pady=(16, 8), padx=16)
+        pbar = ttk.Progressbar(body, mode="determinate", maximum=100)
+        pbar.pack(fill="x", padx=16, pady=8)
+
+        def _worker():
+            for i, f in enumerate(files, 1):
+                dest = Path(SHARED_MODELS_DIR) / f["subfolder"] / f["filename"]
+                if dest.exists():
+                    self.root.after(0, lambda f=f, i=i: lbl.configure(
+                        text=f"({i}/{len(files)}) {f['filename']} already present"))
+                    continue
+
+                def _progress(done, total, f=f, i=i):
+                    pct = int(done * 100 / total) if total else 0
+                    gb_done = done / 1e9
+                    self.root.after(0, lambda: (
+                        pbar.configure(value=pct),
+                        lbl.configure(
+                            text=f"({i}/{len(files)}) {f['filename']}: "
+                                 f"{gb_done:.2f} / {f['size_gb']:.1f} GB")))
+
+                ok = _download_with_progress(f["url"], dest,
+                                             on_progress=_progress,
+                                             timeout=60.0)
+                if not ok:
+                    def _fail(f=f):
+                        win.destroy()
+                        messagebox.showerror(
+                            "Download Failed",
+                            f"Could not download {f['filename']}. "
+                            "Check your connection and disk space.",
+                            parent=self.root)
+                    self.root.after(0, _fail)
+                    self.log(f"Krea model set download failed: {f['filename']}")
+                    return
+
+            def _done():
+                win.destroy()
+                messagebox.showinfo(
+                    "Download Complete",
+                    "All Krea model files downloaded.\n\n"
+                    "Restart ComfyUI so it picks up the new files "
+                    "(and install city96/ComfyUI-GGUF if not already "
+                    "present), then reopen Krea Studio.",
+                    parent=self.root)
+                self.log("Krea model set downloaded")
+            self.root.after(0, _done)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def open_krea_studio(self):
+        """v9.11: standalone Krea (FLUX-Krea-dev) window, mirroring
+        open_qwen_studio's "different architecture, separate window"
+        precedent - shows the download picker when no Krea checkpoint
+        is present, generate controls once one is. Not usable on this
+        6GB dev machine by design (see KREA_DOWNLOAD_OPTIONS) - built
+        for machines with more VRAM."""
+        unet, clip_l, t5, vae = self._krea_files()
+        win, body = self._new_toplevel("Krea Studio (FLUX, experimental)",
+                                       600, 560)
+
+        if not unet:
+            tk.Label(body, text="No Krea checkpoint installed.", bg=self.PANEL,
+                     fg=self.WARN_TEXT, font=self.font_body_bold).pack(
+                anchor="w", padx=12, pady=(16, 4))
+            tk.Label(body, text="Krea (FLUX-Krea-dev) is a large model - "
+                    "even the smallest quantization here needs "
+                    "significantly more VRAM than this 6GB dev machine "
+                    "has. Pick a quantization below for a more capable "
+                    "machine.", bg=self.PANEL, fg=self.FG_MUTED,
+                    wraplength=540, justify="left").pack(
+                anchor="w", padx=12, pady=(0, 10))
+            dl_var = tk.StringVar(
+                value=next(iter(KREA_DOWNLOAD_OPTIONS.values()))["label"])
+            ttk.Combobox(body, textvariable=dl_var, state="readonly",
+                        values=[o["label"] for o in
+                               KREA_DOWNLOAD_OPTIONS.values()],
+                        width=56).pack(anchor="w", padx=12)
+            label_to_key = {o["label"]: k for k, o in
+                            KREA_DOWNLOAD_OPTIONS.items()}
+
+            def do_download():
+                key = label_to_key.get(dl_var.get())
+                if key:
+                    self._download_krea_files(win, key)
+            ttk.Button(body, text="📥 Download",
+                      command=do_download).pack(anchor="w", padx=12, pady=8)
+            self.log("Krea Studio: no checkpoint installed")
+            return
+
+        tk.Label(body, text=f"Model: {unet}", bg=self.PANEL,
+                 fg=self.FG_MUTED, font=self.font_small).pack(
+            anchor="w", padx=12, pady=(10, 0))
+
+        def frow(label):
+            rr = tk.Frame(body, bg=self.PANEL)
+            rr.pack(fill="x", padx=12, pady=3)
+            tk.Label(rr, text=label, bg=self.PANEL, fg=self.FG,
+                     width=10, anchor="w").pack(side="left")
+            return rr
+
+        tk.Label(body, text="Prompt:", bg=self.PANEL, fg=self.ACCENT,
+                 font=self.font_body_bold).pack(anchor="w", padx=12,
+                                                    pady=(10, 2))
+        pos_text = tk.Text(body, height=3, bg=self.INPUT_BG, fg=self.FG,
+                           wrap="word", insertbackground=self.FG,
+                           borderwidth=0)
+        pos_text.pack(fill="x", padx=12)
+        pos_text.insert("1.0", "a girl standing in a sunlit garden, "
+                        "detailed illustration")
+
+        tk.Label(body, text="Negative:", bg=self.PANEL, fg=self.FG_MUTED,
+                 font=self.font_small).pack(anchor="w", padx=12, pady=(6, 0))
+        neg_text = tk.Text(body, height=2, bg=self.INPUT_BG, fg=self.FG,
+                           wrap="word", insertbackground=self.FG,
+                           borderwidth=0)
+        neg_text.pack(fill="x", padx=12)
+        neg_text.insert("1.0", "blurry, low quality, distorted, watermark")
+
+        rr = frow("Size")
+        size_var = tk.StringVar(value="1024x1024")
+        ttk.Combobox(rr, textvariable=size_var, state="readonly",
+                     values=["1024x1024", "832x1216", "1216x832"],
+                     width=14).pack(side="left")
+
+        rr = frow("Steps")
+        steps_var = tk.IntVar(value=20)
+        ttk.Spinbox(rr, textvariable=steps_var, from_=4, to=50,
+                    width=6).pack(side="left")
+        tk.Label(rr, text="Guidance", bg=self.PANEL, fg=self.FG).pack(
+            side="left", padx=(16, 4))
+        guidance_var = tk.DoubleVar(value=3.5)
+        ttk.Spinbox(rr, textvariable=guidance_var, from_=1.0, to=10.0,
+                    increment=0.5, width=6).pack(side="left")
+
+        status = tk.Label(body, text="Experimental: first run validates the "
+                          "node graph against this server (UnetLoaderGGUF/"
+                          "DualCLIPLoader/FluxGuidance not yet confirmed "
+                          "live here).", bg=self.PANEL, fg=self.FG_MUTED,
+                          wraplength=540, justify="left")
+        status.pack(anchor="w", padx=12, pady=8)
+
+        def start():
+            positive = pos_text.get("1.0", "end").strip()
+            if not positive:
+                messagebox.showinfo("No prompt", "Enter a prompt first.",
+                                    parent=win)
+                return
+            if self.busy:
+                messagebox.showinfo("Busy", "A generation is running.",
+                                    parent=win)
+                return
+            if not self.client.base_url:
+                messagebox.showerror("Offline", "ComfyUI not connected.",
+                                     parent=win)
+                return
+            negative = neg_text.get("1.0", "end").strip()
+            w, h = (int(x) for x in size_var.get().split("x"))
+            go_btn.configure(state="disabled", text="Generating...")
+
+            def setv(t):
+                self.root.after(0, lambda: status.config(text=t))
+
+            def done():
+                self.root.after(0, lambda: go_btn.configure(
+                    state="normal", text="🎨 GENERATE"))
+            self.stop_flag = False
+            threading.Thread(
+                target=self._krea_worker,
+                args=(unet, clip_l, t5, vae, positive, negative, w, h,
+                      int(steps_var.get()), float(guidance_var.get()),
+                      setv, done),
+                daemon=True).start()
+
+        go_btn = ttk.Button(body, text="🎨 GENERATE", command=start)
+        go_btn.pack(pady=8)
+        self.log("Opened Krea Studio")
+
+    def _krea_worker(self, unet, clip_l, t5, vae, positive, negative,
+                     width, height, steps, guidance, set_status, done_cb):
+        self.busy = True
+        t0 = time.time()
+        try:
+            seed = random.randint(0, 2**48)
+            set_status("Building workflow...")
+            self.quotes.release_vram()
+            wf = self.client.build_krea_workflow(
+                unet_name=unet, clip_l_name=clip_l, t5_name=t5,
+                vae_name=vae, positive=positive, negative=negative,
+                width=width, height=height, steps=steps, seed=seed,
+                guidance=guidance)
+            set_status("Rendering (Krea, slow on any card without "
+                       "significant VRAM)...")
+            entry = self._queue_and_wait(wf, on_tick=lambda: set_status(
+                f"Rendering... ({time.time()-t0:.0f}s)"))
+            outputs = entry.get("outputs", {}) if (entry and isinstance(entry, dict)) else {}
+            images = [x for o in outputs.values() for x in o.get("images", [])]
+            if not images:
+                self.log("Krea Studio: No image output found in result")
+                set_status("Failed: no output")
+                return
+            info = images[0]
+            raw = self.client.download_image(
+                info["filename"], info.get("subfolder", ""),
+                info.get("type", "output"))
+            out_dir = self.output_dir / "krea_studio"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            stamp = f"3klipz_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            out_path = out_dir / f"{stamp}_krea.png"
+            out_path.write_bytes(raw)
+            meta = {"prompt": positive, "negative": negative, "seed": seed,
+                    "width": width, "height": height, "steps": steps,
+                    "guidance": guidance, "unet": unet,
+                    "architecture": "krea_flux"}
+            safe_json_save(out_path.with_suffix(".json"), meta)
+            self.show_preview(out_path)
+            elapsed = time.time() - t0
+            set_status(f"DONE ({elapsed:.0f}s) -> {out_path.name}")
+            self.log(f"Krea Studio: {out_path.name} ({elapsed:.0f}s)")
+        except Exception as e:
+            self.log(f"Krea Studio ERROR: {e}")
+            set_status(f"Failed: {e}")
+        finally:
+            self.busy = False
+            done_cb()
 
     def open_qwen_studio(self):
         """Standalone txt2img window for Qwen-Image-architecture
@@ -20837,6 +21312,7 @@ Click history arrows to replay generations
             ("🏷 Sticker Studio (PNG + SVG export)", self.open_sticker_studio),
             ("✨ Qwen-Image Studio (experimental)", self.open_qwen_studio),
             ("🎬 Wan Video Studio (text-to-video)", self.open_wan_video_studio),
+            ("🖼 Krea Studio (FLUX, experimental)", self.open_krea_studio),
             ("🎨 Inpaint / Edit Region", self.open_inpaint),
             None,
             ("🎮 Character Collection Pack", self.open_nintendo_pack),
@@ -23328,6 +23804,11 @@ Top 5 Personas:
                  if self.caps["tiled_upscale"] else
                  "Tiled upscale unavailable (Ultimate SD Upscale not "
                  "installed - falling back to single-pass 4K)")
+        if getattr(self, "enable_upscale_btn", None):
+            if self.upscale_models:
+                self.enable_upscale_btn.pack_forget()
+            else:
+                self.enable_upscale_btn.pack(side="left", padx=(8, 2))
 
         def _enable(widgets, on):
             for w in widgets:
@@ -23720,6 +24201,19 @@ Top 5 Personas:
             if first_path:
                 self.show_preview(first_path)
                 self._apply_face_lock(persona, first_path)
+
+            # v9.11: Maximum Mode - chain tiled upscale + face detailer
+            # after the base pass. Runs after the base save/preview above
+            # so a Maximum Mode failure never loses the base result -
+            # first_path is only reassigned on success.
+            if first_path and self.maximum_chain_var.get():
+                finished = self._run_maximum_mode_finishing(
+                    first_path, positive, negative, ckpt,
+                    set_status=lambda t: self.root.after(
+                        0, lambda: self.progress_lbl.config(text=t)))
+                if finished != first_path:
+                    first_path = finished
+                    self.show_preview(first_path)
 
             # auto-caption in smart mode
             if self.smart_var.get() and persona and saved:
@@ -24159,6 +24653,86 @@ Top 5 Personas:
             self.root.after(0, lambda: self.progress_lbl.config(text="Ready"))
         finally:
             self.busy = False
+
+    # ── v9.11: Maximum Mode finishing chain ─────────────────────────────────
+    def _run_maximum_mode_finishing(self, image_path, positive, negative,
+                                    ckpt, set_status=None):
+        """Chains tiled upscale + face detailer after a base image, for
+        Maximum Mode. Busy-flag-free core (caller manages self.busy),
+        mirrors _tiled_upscale_worker/_detailer_worker's exact
+        build/queue/download/save shape but without their own dialogs.
+        Each stage independently guarded by capability - skips with a
+        log line rather than failing if unavailable, same convention as
+        every other capability-gated feature in this app. Returns the
+        final Path (== image_path unchanged if both stages were
+        skipped/unavailable)."""
+        set_status = set_status or (lambda t: None)
+        current = image_path
+        if self.caps.get("tiled_upscale") and self.upscale_models:
+            try:
+                set_status("Maximum Mode: tiled upscale...")
+                self.quotes.release_vram()
+                image_name = self._upload_ref(current)
+                wf = self.client.build_tiled_upscale_workflow(
+                    image_name=image_name, ckpt=ckpt, positive=positive,
+                    negative=negative, upscale_model=self.upscale_models[0],
+                    seed=random.randint(0, 2**48), upscale_by=1.5,
+                    tile_size=512, denoise=0.2)
+                entry = self._queue_and_wait(wf)
+                outputs = entry.get("outputs", {}) if (entry and isinstance(entry, dict)) else {}
+                images = [x for o in outputs.values() for x in o.get("images", [])]
+                if images:
+                    info = images[0]
+                    data = self.client.download_image(
+                        info["filename"], info.get("subfolder", ""),
+                        info.get("type", "output"))
+                    out_dir = self.output_dir / "maximum_mode"
+                    out_dir.mkdir(exist_ok=True)
+                    stamp = f"3klipz_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    out_path = out_dir / f"{stamp}_upscaled.png"
+                    out_path.write_bytes(data)
+                    current = out_path
+                    self.log(f"Maximum Mode: tiled upscale -> {out_path.name}")
+                else:
+                    self.log("Maximum Mode: tiled upscale produced no output - skipped")
+            except Exception as e:
+                self.log(f"Maximum Mode: tiled upscale skipped ({e})")
+        elif not self.caps.get("tiled_upscale"):
+            self.log("Maximum Mode: tiled upscale unavailable - skipped")
+
+        if self.caps.get("detailer") and self.bbox_face_model:
+            try:
+                set_status("Maximum Mode: face detailer...")
+                self.quotes.release_vram()
+                image_name = self._upload_ref(current)
+                wf = self.client.build_detailer_pass(
+                    image_name=image_name, ckpt=ckpt, positive=positive,
+                    negative=negative, bbox_model=self.bbox_face_model,
+                    sam_model=self.sam_model_name,
+                    seed=random.randint(0, 2**48), denoise=0.4)
+                entry = self._queue_and_wait(wf)
+                outputs = entry.get("outputs", {}) if (entry and isinstance(entry, dict)) else {}
+                images = [x for o in outputs.values() for x in o.get("images", [])]
+                if images:
+                    info = images[0]
+                    data = self.client.download_image(
+                        info["filename"], info.get("subfolder", ""),
+                        info.get("type", "output"))
+                    out_dir = self.output_dir / "maximum_mode"
+                    out_dir.mkdir(exist_ok=True)
+                    stamp = f"3klipz_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    out_path = out_dir / f"{stamp}_detailed.png"
+                    out_path.write_bytes(data)
+                    current = out_path
+                    self.log(f"Maximum Mode: face detailer -> {out_path.name}")
+                else:
+                    self.log("Maximum Mode: detailer produced no output - skipped")
+            except Exception as e:
+                self.log(f"Maximum Mode: detailer skipped ({e})")
+        elif not self.caps.get("detailer"):
+            self.log("Maximum Mode: face detailer unavailable - skipped")
+
+        return current
 
     # ── v6.0: Tiled Upscale (Ultimate SD Upscale) ───────────────────────────
     def start_tiled_upscale(self, src_path=None):
