@@ -6377,6 +6377,7 @@ LISTICLE_TOPIC_POOLS = {
 QUOTE_NICHE_CATEGORY = {
     "quotes": None, "affirmations": "mentor", "philosophy": "mysterious",
     "villain_quotes": "villain", "romance": "romantic",
+    "jesus_quotes": "jesus",
 }
 
 # v8.8: Channel Studio niche registry - each entry describes one complete
@@ -6424,6 +6425,11 @@ CHANNEL_NICHES = {
     "romance": {"label": "Romance/Slow-Burn Quotes",
                "visual_theme": "shoujo romance, cherry blossoms, soft "
                               "bokeh, romantic atmosphere"},
+    "jesus_quotes": {"label": "Jesus/Faith Quotes",
+                    "visual_theme": "sacred golden light, soft reverent "
+                                   "glow, stained-glass color palette, "
+                                   "peaceful worship atmosphere, dove and "
+                                   "cross motifs, painterly and tasteful"},
     "listicle": {"label": "Anime Top 10/Listicle",
                  "visual_theme": "anime concept art, dynamic poster style"},
     "anime_facts": {"label": "Anime Facts/Trivia",
@@ -7291,6 +7297,28 @@ BUILTIN_QUOTE_BANK = {
         "Hope isn't naive - it's the hardest thing to hold onto.",
         "One more step. That's all courage ever really is.",
         "I'd rather fail trying than win by walking away.",
+        "I don't need to be fearless. I just need to move anyway.",
+        "The line holds because I'm standing on it.",
+        "I've been broken before. I know how to get back up.",
+        "Somebody has to go first. Might as well be me.",
+        "I'm not fighting for glory. I'm fighting so you get tomorrow.",
+        "Doubt is loud right before you win. Keep going.",
+        "I carry the weight so someone else doesn't have to.",
+        "Courage isn't the absence of fear - it's choosing you anyway.",
+        "Every time they said I'd fall, I found another reason to stand.",
+        "I'll bleed for this. I won't apologize for it.",
+        "The scared version of me still showed up. That's the whole story.",
+        "I don't need the odds. I need one more chance.",
+        "You can knock the wind out of me - you'll never knock out my reason.",
+        "I promised I'd protect this. A promise is a kind of armor.",
+        "Losing taught me more than winning ever did.",
+        "I'm still standing because giving up was never an option I kept.",
+        "Somewhere out there, someone's counting on me not to quit. That's enough.",
+        "I didn't get stronger by avoiding the fight. I got stronger by surviving it.",
+        "Every hero was ordinary right up until the moment they weren't.",
+        "I'll take every hit if it means you don't have to.",
+        "Fear rode with me the whole way. I just never let it drive.",
+        "This isn't about being unbreakable. It's about breaking and rebuilding anyway.",
     ],
     "villain": [
         "Mercy is a debt I stopped paying long ago.",
@@ -7301,6 +7329,28 @@ BUILTIN_QUOTE_BANK = {
         "Weakness is just strength that hasn't been tested yet.",
         "I stopped asking permission the day they stopped listening.",
         "Fear me or follow me - either works.",
+        "I didn't lose my conscience. I traded it for results.",
+        "Kindness is a currency I stopped accepting years ago.",
+        "You mistake my patience for mercy. Both end the same way.",
+        "I don't hate you. I simply have no use for you.",
+        "Order is just chaos that finally found a leader.",
+        "Every 'no' I ever heard, I turned into a reason.",
+        "I built my throne from every promise the world broke to me.",
+        "Villains aren't born. We're just heroes the story didn't need.",
+        "Pain taught me the one lesson virtue never could.",
+        "I stopped waiting for the world to be fair. I made it mine instead.",
+        "Loyalty is a leash. I cut mine off long ago.",
+        "You call it a monster. I call it honesty without the mask.",
+        "The strong write the rules. The weak just memorize them.",
+        "I don't need to be loved. I need to be obeyed.",
+        "Every scar you gave me, I sharpened into a blade.",
+        "Compassion is a luxury for people who've never truly lost anything.",
+        "I am the ending every hero secretly fears.",
+        "You built cages for men like me. I simply refused to fit.",
+        "There's no victory in being good. Only in being undefeated.",
+        "I don't need your forgiveness. I stopped needing anything from you.",
+        "The world called me a villain the moment I stopped asking for permission to win.",
+        "Ruin isn't cruelty. It's just honesty the world wasn't ready for.",
     ],
     "mentor": [
         "Wisdom is just the scar tissue of every mistake I survived.",
@@ -7311,6 +7361,28 @@ BUILTIN_QUOTE_BANK = {
         "I've buried enough regrets to know which ones matter.",
         "Teach what you know. Live what you believe.",
         "Every master was once someone who refused to quit.",
+        "The best thing I can give you is the truth, not comfort.",
+        "You'll learn more from your worst day than your best one.",
+        "I'm not here to make it easy. I'm here to make it possible.",
+        "Discipline is just love you give yourself when no one's watching.",
+        "Every scar I carry taught me something you don't have to learn the hard way.",
+        "Growth doesn't ask permission. It just happens while you're busy trying.",
+        "I stopped chasing answers. Now I just teach better questions.",
+        "You already have what you need. I'm just here to remind you.",
+        "The path is yours. I only walked it first.",
+        "Failure isn't the opposite of mastery. It's the price of it.",
+        "I've made every mistake you're about to make. Learn faster than I did.",
+        "Real strength doesn't announce itself. It just keeps showing up.",
+        "I don't teach shortcuts. I teach what actually lasts.",
+        "You'll outgrow me one day. That's the whole point of teaching.",
+        "Humility is knowing how much you still don't know.",
+        "The lesson isn't in the victory. It's in what the loss cost you.",
+        "I was your age once, certain I knew everything. I was wrong then too.",
+        "Wisdom whispers. Only fools need to shout to be heard.",
+        "I've watched a hundred students. The ones who listen outlast the ones who rush.",
+        "You don't need to be ready. You need to begin.",
+        "Every great fighter I've trained started out afraid. So did I.",
+        "The greatest gift I can give you is honesty about your own potential.",
     ],
     "romantic": [
         "You're the quiet I didn't know I needed.",
@@ -7321,6 +7393,28 @@ BUILTIN_QUOTE_BANK = {
         "I fell slowly, then completely, then without regret.",
         "Distance is just a test for how much I actually mean it.",
         "You're the reason I still believe in soft things.",
+        "I didn't know I was lonely until you made the silence feel different.",
+        "Every version of my future somehow has your face in it.",
+        "You didn't fix me. You just made being broken feel less alone.",
+        "I'd rather have your worst days than anyone else's best ones.",
+        "There's a version of forever I only believe in because of you.",
+        "You're the sentence my heart keeps rereading.",
+        "I stopped counting the ways I love you - it kept multiplying.",
+        "You make leaving feel impossible and staying feel like breathing.",
+        "I used to think love was loud. Then I met you, and it was just quiet certainty.",
+        "You're my favorite kind of distraction.",
+        "Every goodbye we've had just made the next hello mean more.",
+        "I didn't choose you carefully. I just never stopped choosing you.",
+        "You feel like the one thing I got right without trying.",
+        "I've memorized your laugh the way other people memorize prayers.",
+        "You're proof that some strangers are just love that hasn't introduced itself yet.",
+        "I stopped needing forever the moment I had today with you.",
+        "You make even the ordinary parts of my life feel worth writing down.",
+        "I didn't fall for you all at once. I fell for you in a thousand small moments.",
+        "You're the reason I check twice before I say goodbye.",
+        "Loving you taught me that home can be a person, not just a place.",
+        "I'd cross every version of this story just to end up next to you.",
+        "You're the calm I didn't know I was searching for.",
     ],
     "comedic": [
         "I have a plan. It's a terrible plan, but I have one.",
@@ -7331,6 +7425,23 @@ BUILTIN_QUOTE_BANK = {
         "My strategy is 'yell and hope.' It works more than you'd think.",
         "I peaked at breakfast. Everything since has been a formality.",
         "Danger is my middle name. My first name is also mildly concerning.",
+        "I've made worse decisions with less information, so honestly this tracks.",
+        "My plan has three steps. Step one is 'figure out the other two.'",
+        "I'm not clumsy. Gravity is just unusually attracted to me.",
+        "Winning isn't everything, but it's definitely better than whatever this is.",
+        "I said I'd handle it. I did not specify how badly.",
+        "My inner voice has given up and is now just narrating my mistakes sarcastically.",
+        "I'm one bad decision away from a really interesting story.",
+        "Panic is just enthusiasm with worse timing.",
+        "I've survived on pure luck and questionable confidence for years now.",
+        "I don't run from my problems. I just strategically nap through them.",
+        "My superpower is making simple things unnecessarily complicated.",
+        "I once fought a monster and lost, but I did make it laugh first.",
+        "I'm not saying it was my fault. I'm saying no one else was around to blame.",
+        "Every plan I make survives first contact with reality for about six seconds.",
+        "I treat every problem like it's a small fire. Mostly correct, occasionally literal.",
+        "I have the confidence of someone who's never once read the instructions.",
+        "My greatest strength is convincing people my terrible ideas sound reasonable.",
     ],
     "mysterious": [
         "Some questions are better left unanswered - ask me anyway.",
@@ -7341,6 +7452,20 @@ BUILTIN_QUOTE_BANK = {
         "Shadows aren't empty - they're just patient.",
         "I don't explain myself. I let the outcome do that.",
         "Curiosity is a debt. I always collect.",
+        "I've seen how this ends. I'm still choosing to walk it anyway.",
+        "Some secrets aren't kept - they're carried.",
+        "I speak in riddles because the truth rarely survives being said plainly.",
+        "You won't find my name in any record that matters.",
+        "I arrive exactly when I'm needed and never a moment before.",
+        "There's a version of me even I've stopped trying to understand.",
+        "I don't lie. I just let silence answer for me.",
+        "Every door I've opened led somewhere I already knew.",
+        "The past doesn't haunt me. I keep it close on purpose.",
+        "I collect the things people try to forget.",
+        "You're not meant to trust me. You're meant to wonder.",
+        "I've outlived every story told about me. That should tell you something.",
+        "Not all who wander are lost. Some of us are exactly where we planned to be.",
+        "I let people fill in the blanks. Their guesses are usually more interesting than the truth.",
     ],
     "chill": [
         "Some days are for winning. Today's for tea and quiet.",
@@ -7351,6 +7476,60 @@ BUILTIN_QUOTE_BANK = {
         "The best days are the ones nobody remembers by name.",
         "Rest isn't quitting. It's just the other half of trying.",
         "Some silence is worth more than any answer.",
+        "I stopped rushing toward things that were never going anywhere.",
+        "A quiet afternoon has never once let me down.",
+        "There's a kind of peace that only shows up once you stop chasing it.",
+        "I've learned more sitting still than I ever did running.",
+        "Some days the biggest win is just choosing not to hurry.",
+        "The world moves fast. I've decided not to join it today.",
+        "Nothing urgent has ever survived a good cup of tea.",
+        "I don't need excitement. I need one more quiet hour like this.",
+        "Stillness isn't empty. It's where I do my best thinking.",
+        "Some evenings ask for nothing but a blanket and low light.",
+        "I've stopped apologizing for slow mornings. They earned their place.",
+        "Not everything worth having comes from effort. Some of it comes from rest.",
+    ],
+    "jesus": [
+        "Faith isn't the absence of fear - it's trusting God is bigger than it.",
+        "Grace found me before I ever thought to look for it.",
+        "Peace isn't the absence of the storm. It's Christ steady beside you in it.",
+        "God doesn't call the equipped - He equips the called.",
+        "Every unanswered prayer taught me something answered ones couldn't.",
+        "I don't walk alone. I never have.",
+        "Grace doesn't ask if you deserve it. It just meets you where you are.",
+        "The cross wasn't the end of the story - it was the beginning of everything after.",
+        "Love your neighbor as yourself - not when it's easy, especially when it isn't.",
+        "Faith is choosing to trust the plan even when you can't see the path.",
+        "Every valley I've walked through, He walked through with me.",
+        "You were never too far gone for grace to reach you.",
+        "His mercies are new every morning - even the mornings I don't deserve them.",
+        "I am not who I was. That's what grace does.",
+        "The light doesn't wait for the darkness to leave - it just shows up anyway.",
+        "Prayer isn't about changing God's mind. It's about aligning mine with His.",
+        "In every season, His faithfulness has never once run out.",
+        "I've stopped asking why and started asking what He's teaching me through it.",
+        "Weakness is where His strength shows up the loudest.",
+        "The same God who calmed the storm is the one holding you now.",
+        "Grace covers what effort never could.",
+        "Hope isn't wishful thinking - it's certainty in what's already promised.",
+        "Every burden I laid down, He was already carrying.",
+        "You don't need to have it all together to be loved completely.",
+        "The prodigal wasn't punished when he came home - he was celebrated.",
+        "Faith the size of a mustard seed has moved more mountains than doubt ever built.",
+        "God's timing has never once been late, even when mine screamed that it was.",
+        "Forgiveness isn't earned. It's given, the same way it was given to me.",
+        "Even in the wilderness, I was never once forgotten.",
+        "His grace is sufficient - not because my strength is enough, but because His is.",
+        "I don't have to fear tomorrow. He's already there.",
+        "Love is patient, love is kind - and love is the whole point.",
+        "Every scar I carry, He's turning into a testimony.",
+        "The joy of the Lord is my strength, even on the days strength feels far away.",
+        "I was made on purpose, for a purpose, by the One who makes no mistakes.",
+        "Surrender isn't losing control. It's finally putting it in better hands.",
+        "Be still, and know - the striving was never the point.",
+        "Every door He's closed, I've learned to trust the one He's opening instead.",
+        "Grace isn't fair. That's exactly why it's grace.",
+        "I don't carry my worries alone - I was never meant to.",
     ],
 }
 
@@ -10164,6 +10343,23 @@ class CompanionApp:
                                "Mature Content Mode "
                                f"{'enabled' if self.mature_mode_var.get() else 'disabled'}")
                            ).pack(anchor="w", pady=(4, 0))
+
+        # v9.13: Only Jesus Mode - a full content-focus override, not just
+        # another niche option: when on, every quote source (Quote
+        # Generator panel + Channel Studio quote pipelines) draws
+        # exclusively from BUILTIN_QUOTE_BANK["jesus"] regardless of the
+        # selected persona/niche. Available in both Pro and Kids - wholesome
+        # content, unlike Mature Content Mode there's no reason to gate it.
+        self.jesus_mode_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(mid, text="✝️ Only Jesus Mode (all quotes are "
+                       "faith/Jesus-themed, overrides persona voice)",
+                       variable=self.jesus_mode_var, bg=self.PANEL,
+                       fg=self.FG_DIM, selectcolor=self.INPUT_BG,
+                       activebackground=self.PANEL,
+                       command=lambda: self.log(
+                           "Only Jesus Mode "
+                           f"{'enabled' if self.jesus_mode_var.get() else 'disabled'}")
+                       ).pack(anchor="w", pady=(2, 0))
 
         btn_row = tk.Frame(mid, bg=self.PANEL)
         btn_row.pack(fill="x", pady=10)
@@ -13509,9 +13705,13 @@ Click history arrows to replay generations
 
     def _quote_worker(self, persona: dict):
         try:
-            if self.quotes.backend is None:
-                self.quotes.detect()
-            quote, source = self.quotes.generate(persona)
+            override = self._jesus_quote_override()
+            if override:
+                quote, source = override
+            else:
+                if self.quotes.backend is None:
+                    self.quotes.detect()
+                quote, source = self.quotes.generate(persona)
             name = persona.get("name", "")
 
             def _show():
@@ -17282,6 +17482,16 @@ Click history arrows to replay generations
         return (out_path if out_path.exists() and
                out_path.stat().st_size > 0 else None)
 
+    def _jesus_quote_override(self):
+        """v9.13: when Only Jesus Mode is on, every quote source draws
+        exclusively from BUILTIN_QUOTE_BANK["jesus"] - a full content-
+        focus override, not just another niche pick, so it wins over
+        whatever persona/niche/LLM path would otherwise run. Returns
+        (quote, source) or None when the mode is off."""
+        if getattr(self, "jesus_mode_var", None) and self.jesus_mode_var.get():
+            return random.choice(BUILTIN_QUOTE_BANK["jesus"]), "Only Jesus Mode"
+        return None
+
     def _get_niche_quote(self, persona, category_hint=None):
         """Same quote sourcing as QuoteGenerator.generate (LLM in-
         character quote, else signature_quote, else the offline
@@ -17291,6 +17501,9 @@ Click history arrows to replay generations
         - the LLM path already writes a fresh in-character line
         regardless, so the bias only matters for the fully-offline
         fallback path."""
+        override = self._jesus_quote_override()
+        if override:
+            return override
         if not self.quotes.backend:
             self.quotes.detect()
         if self.quotes.backend:
@@ -17660,6 +17873,7 @@ Click history arrows to replay generations
             "philosophy": "stoic philosophy quotes",
             "villain_quotes": "anime villain quotes",
             "romance": "romance quotes",
+            "jesus_quotes": "faith and Jesus quotes",
             "listicle": "anime countdown",
             "anime_facts": "anime facts", "mythology": "mythology countdown",
             "gaming_facts": "gaming facts", "horror_facts": "horror facts",
