@@ -849,6 +849,43 @@ ART_STYLES = [
 # only, not the full illustration/painting/anime pool.
 PHOTOGRAPHY_STYLES = [s for s in ART_STYLES if "photography" in s]
 
+# v11.0: keyword-classified realism tag per ART_STYLES entry ("anime",
+# "realistic", or "neutral") - lets Auto-Pilot/Pilots steer style choice
+# toward a matching aesthetic instead of today's fully-random pick.
+# Purely additive: ART_STYLES itself is untouched, every existing
+# consumer that iterates/indexes it is unaffected.
+_ANIME_STYLE_KW = ("anime", "manga", "shonen", "shoujo", "chibi", "cel-shaded",
+                   "cel shaded", "ufotable", "kyoto animation", "shinkai",
+                   "trigger studio", "mappa studio", "studio bones",
+                   "cloverworks", "yandere", "isekai", "waifu")
+_REALISTIC_STYLE_KW = ("photograph", "photorealistic", "hyperrealistic",
+                       "film noir", "polaroid", "tintype", "documentary")
+
+
+def _classify_style_realism(style_text: str) -> str:
+    low = style_text.lower()
+    if any(k in low for k in _ANIME_STYLE_KW):
+        return "anime"
+    if any(k in low for k in _REALISTIC_STYLE_KW):
+        return "realistic"
+    return "neutral"
+
+
+ART_STYLE_REALISM = {s: _classify_style_realism(s) for s in ART_STYLES}
+
+
+def styles_for_realism(mode: str) -> list:
+    """Filter ART_STYLES by aesthetic mode ("anime"/"realistic"/"mixed").
+    "mixed" (or any unrecognized mode) returns the full, untouched list -
+    the safe default that matches pre-v11.0 behavior exactly. Neutral
+    styles (cyberpunk, watercolor, etc.) are included in every mode since
+    they don't commit to either aesthetic."""
+    if mode not in ("anime", "realistic"):
+        return ART_STYLES
+    matched = [s for s in ART_STYLES
+               if ART_STYLE_REALISM[s] in (mode, "neutral")]
+    return matched or ART_STYLES
+
 # v9.12: "hyper detail" layer - named illustrator/style-reference tags
 # (a standard, widely-used prompting technique - artist NAMES as style
 # descriptors, not reproductions of their specific copyrighted
@@ -3296,6 +3333,14 @@ class ComfyClient:
             return self._combo_options(spec)
         except (KeyError, IndexError):
             return []
+
+    def get_checkpoints_classified(self) -> dict:
+        """{ckpt_name: "anime"|"realistic"|"unknown"} for every checkpoint
+        currently on the server, via CompanionApp.classify_checkpoint_realism
+        (v11.0). Used to filter Auto-Pilot/Pilot checkpoint picks toward a
+        matching aesthetic."""
+        return {c: CompanionApp.classify_checkpoint_realism(c)
+                for c in self.get_checkpoints()}
 
     def get_upscale_models(self) -> list:
         try:
@@ -13258,6 +13303,9 @@ Click history arrows to replay generations
             "storyboard_cycles": False, "storyboard_every": 5,
             "photography_cycles": False, "photography_every": 5,
             "waifu_cycles": False, "waifu_every": 6,
+            "aesthetic_mode": daily_cfg.get("aesthetic_mode", "mixed"),
+            "aesthetic_lock_per_cycle": bool(
+                daily_cfg.get("aesthetic_lock_per_cycle", True)),
             "var_models": False, "var_models_every": 5,
             "var_loras": False, "var_samplers": False, "var_modes": False,
             "var_llm_prompts": False,
@@ -26850,6 +26898,30 @@ Top 5 Personas:
         return any(k in low for k in ("turbo", "lightning", "lcm", "hyper"))
 
     @staticmethod
+    def classify_checkpoint_realism(ckpt_name: str) -> str:
+        """Best-effort anime vs. realistic classification of a checkpoint
+        filename, purely by keyword match (same idiom as _is_sd15/
+        _is_turbo_distilled above) - no model introspection, no ML.
+        Used to steer Auto-Pilot cycles/pilots toward a matching aesthetic
+        instead of today's fully-random checkpoint/style pairing. Returns
+        "anime", "realistic", or "unknown" (mixed/uncertain - never blocks
+        selection, callers should treat "unknown" as compatible with
+        either aesthetic)."""
+        low = ckpt_name.lower()
+        anime_kw = ("animagine", "oneobsession", "anime", "waifu",
+                    "illustrious", "pony", "nova-anime", "novaanime",
+                    "counterfeit", "meina", "cetusmix", "abyssorange")
+        real_kw = ("photoreal", "realvis", "juggernaut", "epicrealism",
+                   "realisticvision", "cyberrealistic", "unstablephoto")
+        if any(k in low for k in anime_kw):
+            return "anime"
+        if any(k in low for k in real_kw):
+            return "realistic"
+        if "dreamshaper" in low and "real" in low:
+            return "realistic"
+        return "unknown"
+
+    @staticmethod
     def _is_not_a_checkpoint(ckpt_name: str) -> bool:
         """True for auxiliary model files that are sitting in ComfyUI's
         checkpoints/ folder but are NOT loadable checkpoints - VAEs,
@@ -28038,6 +28110,29 @@ Top 5 Personas:
         ttk.Spinbox(wferow, textvariable=waifu_every_var, from_=2, to=20,
                    width=6).pack(side="left", padx=6)
 
+        # --- SECTION 5A2: AESTHETIC MODE (v11.0) ---
+        tk.Label(sf, text="🎨 AESTHETIC MODE", bg=self.PANEL,
+                 fg=self.ACCENT, font=self.font_body_bold).pack(
+            anchor="w", padx=14, pady=(12, 2))
+        aes_row = tk.Frame(sf, bg=self.PANEL)
+        aes_row.pack(fill="x", padx=14)
+        aesthetic_mode_var = tk.StringVar(value="mixed")
+        for val, label in (("mixed", "Mixed (surprise me)"),
+                            ("anime", "Anime only"),
+                            ("realistic", "Realistic only")):
+            tk.Radiobutton(aes_row, text=label, value=val,
+                           variable=aesthetic_mode_var, bg=self.PANEL,
+                           fg=self.FG_DIM, selectcolor=self.INPUT_BG,
+                           activebackground=self.PANEL).pack(side="left", padx=(0, 10))
+        aesthetic_lock_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(sf, text="Lock checkpoint+style to match each cycle's "
+                       "aesthetic (recommended - keeps a 'waifu' cycle from "
+                       "picking a photoreal checkpoint, etc.)",
+                       variable=aesthetic_lock_var, bg=self.PANEL,
+                       fg=self.FG_MUTED, selectcolor=self.INPUT_BG,
+                       activebackground=self.PANEL,
+                       font=self.font_small).pack(anchor="w", padx=14)
+
         # --- SECTION 5B: GENERATION VARIANCE ---
         tk.Label(sf, text="🎲 GENERATION VARIANCE", bg=self.PANEL,
                  fg=self.ACCENT, font=self.font_body_bold).pack(
@@ -28148,6 +28243,8 @@ Top 5 Personas:
                 "waifu_cycles": bool(waifu_var.get()) and not needs_sdxl
                                 and self._mature_allowed(),
                 "waifu_every": int(waifu_every_var.get()),
+                "aesthetic_mode": aesthetic_mode_var.get(),
+                "aesthetic_lock_per_cycle": bool(aesthetic_lock_var.get()),
                 "var_models": bool(var_models_var.get()) and not needs_sdxl,
                 "var_models_every": int(var_models_every_var.get()),
                 "var_loras": bool(var_loras_var.get()),
@@ -28478,6 +28575,16 @@ Top 5 Personas:
                         current_ap_model = random.choice(self.director.models)
                         self.log(f"Auto-Pilot: Switched base model to {current_ap_model}")
 
+                # v11.0: aesthetic-locked checkpoint pool for this cycle -
+                # falls back to the unfiltered pool if nothing matches, so
+                # a run never stalls over a naming-heuristic miss.
+                ap_model_pool = self.director.models if hasattr(self.director, "models") else []
+                if aesthetic_lock and aesthetic_mode != "mixed" and ap_model_pool:
+                    _filtered_pool = [m for m in ap_model_pool
+                                      if self.classify_checkpoint_realism(m)
+                                      in (cycle_aesthetic, "unknown")]
+                    ap_model_pool = _filtered_pool or ap_model_pool
+
                 is_invent = (cfg.get("fuse_characters") and
                             cycle_number % cfg["fuse_every"] == 0 and
                             consecutive_invent_failures < 2)
@@ -28533,6 +28640,31 @@ Top 5 Personas:
                            cfg.get("waifu_cycles") and
                            self._mature_allowed() and
                            cycle_number % cfg["waifu_every"] == 0)
+                # v11.0: resolve this cycle's aesthetic once, up front.
+                # "mixed" mode still biases per cycle type (waifu->anime,
+                # photography->realistic) rather than a flat coin-flip -
+                # a "waifu" cycle landing on a photoreal checkpoint was
+                # exactly the confirmed gap this closes. Explicit
+                # anime/realistic modes always win outright.
+                aesthetic_mode = cfg.get("aesthetic_mode", "mixed")
+                aesthetic_lock = cfg.get("aesthetic_lock_per_cycle", True)
+                if aesthetic_mode in ("anime", "realistic"):
+                    cycle_aesthetic = aesthetic_mode
+                elif is_waifu:
+                    cycle_aesthetic = random.choices(
+                        ["anime", "realistic"], weights=[85, 15])[0]
+                elif is_photography:
+                    cycle_aesthetic = random.choices(
+                        ["anime", "realistic"], weights=[15, 85])[0]
+                else:
+                    cycle_aesthetic = random.choice(["anime", "realistic"])
+                # A waifu cycle under an explicit realistic-only lock is a
+                # genuine mismatch (not a bias to nudge) - skip it cleanly
+                # rather than force a photoreal "waifu" image.
+                if is_waifu and aesthetic_lock and aesthetic_mode == "realistic":
+                    is_waifu = False
+                    self.log("Auto-Pilot: skipped a waifu cycle - "
+                             "Aesthetic Mode is locked to Realistic only")
 
                 if is_invent:
                     label = f"Auto-Pilot (character): "
@@ -28765,14 +28897,17 @@ Top 5 Personas:
                     fusion_other = p2
                     mode = "Fusion"
                     style = self.taste.pick_style("autopilot_fusion",
-                                                  ART_STYLES)
+                                                  styles_for_realism(cycle_aesthetic)
+                                                  if aesthetic_lock else ART_STYLES)
                     name = (f"{p1.get('name', '?')} x "
                            f"{p2.get('name', '?')}")
                     safe_name = re.sub(r"[^\w\-]+", "_", name)[:20]
                     # matches what _vram_preflight would clamp 1024x1024
                     # to on this card anyway - skip the round-trip
                     width, height = 832, 1216
-                    job_ckpt = ckpt_default
+                    job_ckpt = (random.choice(ap_model_pool) if
+                               aesthetic_lock and aesthetic_mode != "mixed"
+                               and ap_model_pool else ckpt_default)
                     sampler, sched = auto_sampler(style)
                     positive = self.wildcards.expand(
                         self.prompts.build(mode, persona, style,
@@ -28787,8 +28922,19 @@ Top 5 Personas:
                     if cfg.get("var_modes"):
                         mode = random.choice(list(["Manga (Grid)", "Webtoon (Vertical Stack)", "Storybook (PDF)"]))
                     width, height = choice["width"], choice["height"]
-                    
+
                     job_ckpt = choice.get("model") or current_ap_model
+                    # v11.0: if the Director's own pick doesn't match this
+                    # cycle's locked aesthetic, override with a matching
+                    # checkpoint/style instead - the Director has no
+                    # aesthetic awareness of its own.
+                    if aesthetic_lock and aesthetic_mode != "mixed":
+                        if self.classify_checkpoint_realism(job_ckpt) not in (
+                                cycle_aesthetic, "unknown") and ap_model_pool:
+                            job_ckpt = random.choice(ap_model_pool)
+                        if ART_STYLE_REALISM.get(style, "neutral") not in (
+                                cycle_aesthetic, "neutral"):
+                            style = random.choice(styles_for_realism(cycle_aesthetic))
                     
                     sampler, sched = auto_sampler(style)
                     positive = self.prompts.build(mode, persona, style)
