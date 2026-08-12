@@ -28625,16 +28625,6 @@ Top 5 Personas:
                         current_ap_model = random.choice(self.director.models)
                         self.log(f"Auto-Pilot: Switched base model to {current_ap_model}")
 
-                # v11.0: aesthetic-locked checkpoint pool for this cycle -
-                # falls back to the unfiltered pool if nothing matches, so
-                # a run never stalls over a naming-heuristic miss.
-                ap_model_pool = self.director.models if hasattr(self.director, "models") else []
-                if aesthetic_lock and aesthetic_mode != "mixed" and ap_model_pool:
-                    _filtered_pool = [m for m in ap_model_pool
-                                      if self.classify_checkpoint_realism(m)
-                                      in (cycle_aesthetic, "unknown")]
-                    ap_model_pool = _filtered_pool or ap_model_pool
-
                 is_invent = (cfg.get("fuse_characters") and
                             cycle_number % cfg["fuse_every"] == 0 and
                             consecutive_invent_failures < 2)
@@ -28715,6 +28705,17 @@ Top 5 Personas:
                     is_waifu = False
                     self.log("Auto-Pilot: skipped a waifu cycle - "
                              "Aesthetic Mode is locked to Realistic only")
+
+                # v11.0: aesthetic-locked checkpoint pool for this cycle -
+                # falls back to the unfiltered pool if nothing matches, so
+                # a run never stalls over a naming-heuristic miss. Must
+                # come after cycle_aesthetic is resolved above.
+                ap_model_pool = self.director.models if hasattr(self.director, "models") else []
+                if aesthetic_lock and aesthetic_mode != "mixed" and ap_model_pool:
+                    _filtered_pool = [m for m in ap_model_pool
+                                      if self.classify_checkpoint_realism(m)
+                                      in (cycle_aesthetic, "unknown")]
+                    ap_model_pool = _filtered_pool or ap_model_pool
 
                 if is_invent:
                     label = f"Auto-Pilot (character): "
