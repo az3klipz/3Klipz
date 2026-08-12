@@ -4056,6 +4056,38 @@ class ComfyClient:
                              "images": ["8", 0]}},
         }
 
+    def build_sana_workflow(self, model_path, positive, negative, width,
+                            height, steps, cfg, seed, pag_scale=2.0,
+                            device="cuda") -> dict:
+        """v9.18: NVIDIA Sana via the SANA_LOWVRAM community node pack
+        (taabata/SANA_LOWVRAM) - confirmed live against /object_info this
+        session (SANATextEncode -> SANADiffuse -> SaveImage), and the
+        exact node graph verified against the pack's own
+        examples/text2img.json rather than guessed. Genuinely different
+        execution model from every other builder in this app: each
+        SANA node spawns its own local Flask subprocess on
+        127.0.0.1:5000 and polls it over HTTP rather than running
+        inference in-process - confirmed by reading the node pack's own
+        source (nodes.py/app.py), not assumed. model_path is a bare HF
+        repo id (e.g. "Efficient-Large-Model/Sana_600M_1024px_diffusers")
+        - diffusers auto-downloads and caches it on first use, no
+        separate download step needed."""
+        negative = f"{negative}, {safety_floor_for_build()}" if negative else safety_floor_for_build()
+        return {
+            "1": {"class_type": "SANATextEncode",
+                  "inputs": {"prompt": positive, "negative_prompt": negative,
+                             "model_path": model_path}},
+            "2": {"class_type": "SANADiffuse",
+                  "inputs": {"seed": seed, "steps": steps, "width": width,
+                             "height": height, "cfg": cfg,
+                             "pag_scale": pag_scale, "img2img": "disable",
+                             "embeds": ["1", 0], "model_path": model_path,
+                             "device": device}},
+            "3": {"class_type": "SaveImage",
+                  "inputs": {"filename_prefix": "companion_sana",
+                             "images": ["2", 0]}},
+        }
+
     def build_krea_workflow(self, unet_name, clip_l_name, t5_name, vae_name,
                             positive, negative, width, height, steps,
                             seed, guidance=3.5, sampler="euler",
@@ -19888,6 +19920,167 @@ Click history arrows to replay generations
 
         threading.Thread(target=_worker, daemon=True).start()
 
+    SANA_MODELS = [
+        "Efficient-Large-Model/Sana_600M_1024px_diffusers",
+        "Efficient-Large-Model/Sana_600M_512px_diffusers",
+        "Efficient-Large-Model/Sana_1600M_1024px_diffusers",
+        "Efficient-Large-Model/Sana_1600M_512px_diffusers",
+    ]
+
+    def open_sana_studio(self):
+        """v9.18: NVIDIA Sana via the SANA_LOWVRAM node pack, confirmed
+        live this session (real SANATextEncode/SANADiffuse nodes,
+        SANA_LOWVRAM's own README states "works on 2GB VRAM" - the only
+        image architecture found this session that genuinely fits this
+        6GB card, unlike Krea/Wan I2V which both need 10GB+). No
+        first-run-detection gate like Krea/Wan Studio have, since
+        model_path is a bare HF repo id diffusers auto-downloads on
+        first use - nothing to "install" from this app's side beyond the
+        node pack itself (a one-time git clone, done at implementation
+        time)."""
+        win, body = self._new_toplevel("Sana Studio (NVIDIA, experimental)",
+                                       600, 560)
+        tk.Label(body, text="NVIDIA Sana - the smallest real image "
+                "architecture found this session that fits this "
+                "card's VRAM. First generation with a given model "
+                "downloads it (~2-6GB) via HuggingFace - may take a "
+                "while.", bg=self.PANEL, fg=self.FG_MUTED, wraplength=540,
+                justify="left").pack(anchor="w", padx=12, pady=(12, 10))
+
+        def frow(label):
+            rr = tk.Frame(body, bg=self.PANEL)
+            rr.pack(fill="x", padx=12, pady=3)
+            tk.Label(rr, text=label, bg=self.PANEL, fg=self.FG,
+                     width=10, anchor="w").pack(side="left")
+            return rr
+
+        rr = frow("Model")
+        model_var = tk.StringVar(value=self.SANA_MODELS[0])
+        ttk.Combobox(rr, textvariable=model_var, state="readonly",
+                     values=self.SANA_MODELS, width=42).pack(side="left")
+
+        tk.Label(body, text="Prompt:", bg=self.PANEL, fg=self.ACCENT,
+                 font=self.font_body_bold).pack(anchor="w", padx=12,
+                                                    pady=(10, 2))
+        pos_text = tk.Text(body, height=3, bg=self.INPUT_BG, fg=self.FG,
+                           wrap="word", insertbackground=self.FG,
+                           borderwidth=0)
+        pos_text.pack(fill="x", padx=12)
+        pos_text.insert("1.0", "a fuzzy orange cat sitting on planet "
+                        "earth, oil painting, abstract")
+
+        tk.Label(body, text="Negative:", bg=self.PANEL, fg=self.FG_MUTED,
+                 font=self.font_small).pack(anchor="w", padx=12, pady=(6, 0))
+        neg_text = tk.Text(body, height=2, bg=self.INPUT_BG, fg=self.FG,
+                           wrap="word", insertbackground=self.FG,
+                           borderwidth=0)
+        neg_text.pack(fill="x", padx=12)
+
+        rr = frow("Size")
+        size_var = tk.StringVar(value="1024x1024")
+        ttk.Combobox(rr, textvariable=size_var, state="readonly",
+                     values=["512x512", "1024x1024"], width=14).pack(side="left")
+
+        rr = frow("Steps")
+        steps_var = tk.IntVar(value=12)
+        ttk.Spinbox(rr, textvariable=steps_var, from_=4, to=40,
+                    width=6).pack(side="left")
+        tk.Label(rr, text="CFG", bg=self.PANEL, fg=self.FG).pack(
+            side="left", padx=(16, 4))
+        cfg_var = tk.DoubleVar(value=5.0)
+        ttk.Spinbox(rr, textvariable=cfg_var, from_=1.0, to=15.0,
+                    increment=0.5, width=6).pack(side="left")
+
+        status = tk.Label(body, text="Experimental: this node pack spawns "
+                          "its own local server subprocess per generation "
+                          "- first run per model is slow (download + "
+                          "startup), later runs are faster.",
+                          bg=self.PANEL, fg=self.FG_MUTED, wraplength=540,
+                          justify="left")
+        status.pack(anchor="w", padx=12, pady=8)
+
+        def start():
+            positive = pos_text.get("1.0", "end").strip()
+            if not positive:
+                messagebox.showinfo("No prompt", "Enter a prompt first.",
+                                    parent=win)
+                return
+            if self.busy:
+                messagebox.showinfo("Busy", "A generation is running.",
+                                    parent=win)
+                return
+            if not self.client.base_url:
+                messagebox.showerror("Offline", "ComfyUI not connected.",
+                                     parent=win)
+                return
+            negative = neg_text.get("1.0", "end").strip()
+            w, h = (int(x) for x in size_var.get().split("x"))
+            go_btn.configure(state="disabled", text="Generating...")
+
+            def setv(t):
+                self.root.after(0, lambda: status.config(text=t))
+
+            def done():
+                self.root.after(0, lambda: go_btn.configure(
+                    state="normal", text="🎨 GENERATE"))
+            self.stop_flag = False
+            threading.Thread(
+                target=self._sana_worker,
+                args=(model_var.get(), positive, negative, w, h,
+                      int(steps_var.get()), float(cfg_var.get()),
+                      setv, done),
+                daemon=True).start()
+
+        go_btn = ttk.Button(body, text="🎨 GENERATE", command=start)
+        go_btn.pack(pady=8)
+        self.log("Opened Sana Studio")
+
+    def _sana_worker(self, model_path, positive, negative, width, height,
+                     steps, cfg, set_status, done_cb):
+        self.busy = True
+        t0 = time.time()
+        try:
+            seed = random.randint(0, 2**48)
+            set_status("Building workflow...")
+            self.quotes.release_vram()
+            wf = self.client.build_sana_workflow(
+                model_path=model_path, positive=positive, negative=negative,
+                width=width, height=height, steps=steps, cfg=cfg, seed=seed)
+            set_status("Rendering (Sana - first run per model downloads "
+                      "it, can take several minutes)...")
+            entry = self._queue_and_wait(wf, on_tick=lambda: set_status(
+                f"Rendering... ({time.time()-t0:.0f}s)"))
+            outputs = entry.get("outputs", {}) if (entry and isinstance(entry, dict)) else {}
+            images = [x for o in outputs.values() for x in o.get("images", [])]
+            if not images:
+                self.log("Sana Studio: No image output found in result")
+                set_status("Failed: no output")
+                return
+            info = images[0]
+            raw = self.client.download_image(
+                info["filename"], info.get("subfolder", ""),
+                info.get("type", "output"))
+            out_dir = self.output_dir / "sana_studio"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            stamp = f"3klipz_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            out_path = out_dir / f"{stamp}_sana.png"
+            out_path.write_bytes(raw)
+            meta = {"prompt": positive, "negative": negative, "seed": seed,
+                    "width": width, "height": height, "steps": steps,
+                    "cfg": cfg, "model_path": model_path,
+                    "architecture": "sana"}
+            safe_json_save(out_path.with_suffix(".json"), meta)
+            self.show_preview(out_path)
+            elapsed = time.time() - t0
+            set_status(f"DONE ({elapsed:.0f}s) -> {out_path.name}")
+            self.log(f"Sana Studio: {out_path.name} ({elapsed:.0f}s)")
+        except Exception as e:
+            self.log(f"Sana Studio ERROR: {e}")
+            set_status(f"Failed: {e}")
+        finally:
+            self.busy = False
+            done_cb()
+
     def open_krea_studio(self):
         """v9.11: standalone Krea (FLUX-Krea-dev) window, mirroring
         open_qwen_studio's "different architecture, separate window"
@@ -21875,6 +22068,7 @@ Click history arrows to replay generations
             ("✨ Qwen-Image Studio (experimental)", self.open_qwen_studio),
             ("🎬 Wan Video Studio (text-to-video)", self.open_wan_video_studio),
             ("🖼 Krea Studio (FLUX, experimental)", self.open_krea_studio),
+            ("🎨 Sana Studio (NVIDIA, experimental)", self.open_sana_studio),
             ("🎨 Inpaint / Edit Region", self.open_inpaint),
             None,
             ("🎮 Character Collection Pack", self.open_nintendo_pack),
