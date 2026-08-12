@@ -9401,6 +9401,27 @@ class CompanionApp:
 
         tk.Frame(body, bg=self.DIVIDER, height=1).pack(fill="x", padx=self.PAD_SECTION)
 
+        # v9.17: "new install -> recommend new models for this machine" -
+        # the actual gap DeviceScanner's recommended_profile never closed
+        # (it only ever recommended generation settings, never a model
+        # file). Reuses the exact download methods already verified live
+        # this session (Krea/Wan I2V/upscale) - tier-matched, not generic.
+        recs = self._model_recommendations_for_tier(hw.get("tier", ""))
+        if recs:
+            tk.Label(body, text="🧠 Recommended for your machine:",
+                     bg=self.PANEL, fg=self.ACCENT,
+                     font=self.font_body_bold).pack(
+                anchor="w", padx=self.PAD_SECTION, pady=(self.PAD, self.PAD_TIGHT))
+            for r in recs[:4]:
+                rr = tk.Frame(body, bg=self.PANEL)
+                rr.pack(fill="x", padx=self.PAD_SECTION, pady=2)
+                tk.Label(rr, text=r["label"], bg=self.PANEL, fg=self.FG_DIM,
+                         font=self.font_small, wraplength=300,
+                         justify="left").pack(side="left", fill="x", expand=True)
+                ttk.Button(rr, text="📥", width=3, command=r["action"]).pack(side="right")
+            tk.Frame(body, bg=self.DIVIDER, height=1).pack(
+                fill="x", padx=self.PAD_SECTION, pady=(self.PAD, 0))
+
         connected = bool(self.client.base_url)
         status_text = ("✓ ComfyUI is already running - you're ready to go."
                        if connected else
@@ -19575,6 +19596,64 @@ Click history arrows to replay generations
         return next((m for m in models if "i2v" in m.lower()
                     and "wan" in m.lower()), None)
 
+    def _model_recommendations_for_tier(self, tier: str) -> list:
+        """v9.17: which of the already-built, already-verified opt-in
+        downloads (Krea/Wan I2V/upscale) make sense to recommend for a
+        given DeviceScanner tier. Reuses the exact download methods and
+        URLs already verified live this session - no new download code,
+        just surfacing the right existing option at the right moment
+        instead of a static "install more stuff" message."""
+        recs = []
+        if not self.upscale_models:
+            recs.append({
+                "label": f"Upscale model ({UPSCALE_MODEL_DOWNLOAD['filename']}, "
+                         f"~{UPSCALE_MODEL_DOWNLOAD['size_mb']:.0f}MB) - "
+                         "enables Maximum Mode's tiled-upscale stage",
+                "action": lambda: self._download_upscale_model(),
+            })
+        if tier == "Ultra High VRAM (24GB+ Class)":
+            recs.append({"label": KREA_DOWNLOAD_OPTIONS["q8_0"]["label"],
+                        "action": lambda: self._download_krea_files(self.root, "q8_0")})
+            recs.append({"label": WAN_I2V_DOWNLOAD_OPTIONS["720p_fp8"]["label"],
+                        "action": lambda: self._download_wan_i2v_model(self.root, "720p_fp8")})
+        elif tier == "Balanced Mid VRAM (8GB - 12GB)":
+            recs.append({"label": KREA_DOWNLOAD_OPTIONS["q4_k_m"]["label"],
+                        "action": lambda: self._download_krea_files(self.root, "q4_k_m")})
+        # Speed/Low VRAM tier: only the upscale model above genuinely fits -
+        # Krea/Wan I2V both need significantly more VRAM than this bucket has.
+        return recs
+
+    def open_model_recommendations(self):
+        """v9.17: persistent menu entry surfacing the same tier-matched
+        model recommendations shown once at first run - reachable anytime
+        (after a hardware change, a new release adding more download
+        options, etc.), not gated behind a fresh install."""
+        hw = DeviceScanner.scan()
+        tier = hw.get("tier", "")
+        recs = self._model_recommendations_for_tier(tier)
+        win, body = self._new_toplevel("🧠 Model Recommendations", 520, 380)
+        tk.Label(body, text="🧠 Model Recommendations", bg=self.PANEL,
+                 fg=self.ACCENT, font=self.font_heading).pack(
+            anchor="w", padx=12, pady=(12, 4))
+        tk.Label(body, text=f"For your detected hardware: {hw.get('gpu_name','?')} "
+                f"({hw.get('vram_gb','?')} GB VRAM) - {tier}", bg=self.PANEL,
+                fg=self.FG_MUTED, wraplength=460, justify="left").pack(
+            anchor="w", padx=12, pady=(0, 10))
+        if not recs:
+            tk.Label(body, text="Nothing new to recommend right now - "
+                    "you already have everything this tier can use.",
+                    bg=self.PANEL, fg=self.FG_DIM, wraplength=460).pack(
+                anchor="w", padx=12, pady=8)
+        for r in recs:
+            rr = tk.Frame(body, bg=self.PANEL)
+            rr.pack(fill="x", padx=12, pady=4)
+            tk.Label(rr, text=r["label"], bg=self.PANEL, fg=self.FG,
+                     wraplength=340, justify="left").pack(
+                side="left", fill="x", expand=True)
+            ttk.Button(rr, text="📥 Download", command=r["action"]).pack(
+                side="right")
+        self.log("Opened Model Recommendations")
+
     def _download_upscale_model(self, parent_win=None):
         """v9.11: one-click download of a small real upscale model
         (UPSCALE_MODEL_DOWNLOAD) so Maximum Mode's tiled-upscale stage
@@ -21817,6 +21896,8 @@ Click history arrows to replay generations
             ("📊 Analytics Dashboard", self.open_analytics_dashboard, "Ctrl+A"),
             ("📈 Gallery Stats", self.show_gallery_stats),
             ("📋 Recommended Upgrades", self.open_recommended_upgrades),
+            ("🧠 Model Recommendations", self.open_model_recommendations),
+            ("💡 Suggest Content Directions", self.open_content_directions),
         ])
         menu("Library", [
             ("🔎 Semantic Search (find by meaning)",
@@ -22561,6 +22642,108 @@ Top 5 Personas:
             msg += f"  {persona}: {count}\n"
 
         messagebox.showinfo("Gallery Statistics", msg)
+
+    # ── v9.17: LLM-brainstormed content directions ──────────────────────────
+    # Honestly scoped: this is the same local LLM + complete_json pattern
+    # already used ~14 places in this file (Wildcard Lab, Pinterest
+    # metadata, Auto Character Designer, etc.), pointed at a new job -
+    # never a new "neural" mechanism, and always grounded in this app's
+    # own real data (installed personas, niches, learned taste scores),
+    # not generic filler.
+    def _suggest_content_directions(self) -> list | None:
+        if self.quotes.backend is None:
+            self.quotes.detect()
+        if not self.quotes.backend:
+            return None
+        personas = self.visible_personas()[:12]
+        persona_lines = "; ".join(
+            f"{p.get('name','?')} ({p.get('visual_details','')[:60]})"
+            for p in personas) or "(no personas yet)"
+        niches = ", ".join(CHANNEL_NICHES.keys())
+        top_styles = self.taste.report(top=6)
+        taste_lines = "; ".join(
+            f"{k.split('|',1)[1] if '|' in k else k} (score {ema})"
+            for k, ema, n in top_styles) or "(no taste history yet)"
+        prompt = (
+            "You are a creative director for an anime-art content studio. "
+            f"Existing personas: {persona_lines}. "
+            f"Available content niches: {niches}. "
+            f"Styles that have historically scored well: {taste_lines}. "
+            "Suggest 5 fresh, specific content directions that build on "
+            "what's already here - persona/niche crossovers, an unused "
+            "niche worth trying, or a style combination not yet explored. "
+            "Each idea must reference at least one real persona name or "
+            "real niche key from the lists above, not something generic. "
+            'Reply ONLY JSON: {"ideas": [{"title": "short title", '
+            '"detail": "1-2 sentences", "niche_or_persona": '
+            '"the real name/key it references"}]} with exactly 5 items.')
+        data = self.quotes.complete_json(prompt, temperature=0.9, max_tokens=700)
+        if not data:
+            return None
+        return data.get("ideas", []) or None
+
+    def open_content_directions(self):
+        """v9.17: shows LLM-brainstormed content ideas grounded in this
+        app's own real personas/niches/taste history - each idea has a
+        one-click "Use this" that opens the relevant existing tool
+        (Character Builder for a persona idea, Channel Command Center for
+        a niche idea) rather than inventing new generation logic."""
+        win, body = self._new_toplevel("💡 Suggest Content Directions", 560, 480)
+        tk.Label(body, text="💡 Suggest Content Directions", bg=self.PANEL,
+                 fg=self.ACCENT, font=self.font_heading).pack(
+            anchor="w", padx=12, pady=(12, 4))
+        tk.Label(body, text="Local-LLM brainstormed ideas based on your "
+                "personas, niches, and what's scored well before - not a "
+                "new learning mechanism, just this app's existing local "
+                "LLM pointed at your own data.", bg=self.PANEL,
+                fg=self.FG_MUTED, wraplength=460, justify="left").pack(
+            anchor="w", padx=12, pady=(0, 10))
+        status = tk.Label(body, text="Thinking...", bg=self.PANEL,
+                          fg=self.FG_DIM)
+        status.pack(anchor="w", padx=12, pady=4)
+        results_frame = tk.Frame(body, bg=self.PANEL)
+        results_frame.pack(fill="both", expand=True, padx=12, pady=4)
+
+        def _worker():
+            ideas = self._suggest_content_directions()
+
+            def _show():
+                status.destroy()
+                if not ideas:
+                    tk.Label(results_frame, text="No LLM available, or "
+                            "nothing came back - make sure Ollama is "
+                            "running.", bg=self.PANEL, fg=self.WARN_TEXT,
+                            wraplength=460, justify="left").pack(anchor="w")
+                    return
+                for idea in ideas:
+                    card = tk.Frame(results_frame, bg=self.INPUT_BG)
+                    card.pack(fill="x", pady=4)
+                    tk.Label(card, text=idea.get("title", "?"), bg=self.INPUT_BG,
+                             fg=self.ACCENT, font=self.font_body_bold,
+                             wraplength=420, justify="left").pack(
+                        anchor="w", padx=8, pady=(6, 0))
+                    tk.Label(card, text=idea.get("detail", ""), bg=self.INPUT_BG,
+                             fg=self.FG, wraplength=420, justify="left").pack(
+                        anchor="w", padx=8, pady=(0, 4))
+                    ref = idea.get("niche_or_persona", "")
+                    btn_row = tk.Frame(card, bg=self.INPUT_BG)
+                    btn_row.pack(fill="x", padx=8, pady=(0, 6))
+                    if ref in CHANNEL_NICHES:
+                        ttk.Button(btn_row, text=f"Use this ({ref}) →",
+                                  command=lambda r=ref: (
+                                      win.destroy(),
+                                      self.open_channel_command_center()
+                                  )).pack(side="left")
+                    else:
+                        ttk.Button(btn_row, text="Use this →",
+                                  command=lambda: (
+                                      win.destroy(),
+                                      self.open_character_builder()
+                                  )).pack(side="left")
+            self.root.after(0, _show)
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self.log("Opened Suggest Content Directions")
 
     # ── v6.4: Recommended Upgrades panel ────────────────────────────────────
     def open_recommended_upgrades(self):
