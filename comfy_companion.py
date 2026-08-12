@@ -13142,6 +13142,267 @@ Click history arrows to replay generations
             done_cb()
 
     # ── v3.6: MasterMind dashboard ──────────────────────────────────────────
+    # ── v9.13: "Grow Daily" - headless Auto-Pilot/Channel Studio entry
+    # points, extending the exact --mastermind pattern (CLI flag -> pre-Tk
+    # dispatch in main() -> schtasks DAILY) to the two other production
+    # engines. Posting stays a hard human-confirm wall (post_via_api's
+    # messagebox) - these only get content to "produced"/"reviewed" in the
+    # ledger, never further, matching this app's non-negotiable safety
+    # convention of never posting to the public internet unattended. ────
+
+    def _daily_config_path(self, name: str) -> Path:
+        return app_dir() / name
+
+    def _load_daily_autopilot_config(self) -> dict:
+        return safe_json_load(self._daily_config_path(
+            "daily_autopilot_config.json"),
+            {"enabled": False, "target_count": 8})
+
+    def _load_daily_channel_config(self) -> dict:
+        return safe_json_load(self._daily_config_path(
+            "daily_channel_config.json"),
+            {"enabled": False, "target_count": 6,
+             "niches": ["listicle", "gaming_facts"]})
+
+    def _build_daily_autopilot_cfg(self, daily_cfg: dict) -> dict:
+        """Safe, bounded default cfg for the headless --autopilot-daily
+        entry point - mirrors start_autopilot's own cfg dict shape
+        (built in that method's start() closure) but every optional
+        cycle type defaults off, so an unattended overnight run only
+        ever does what a human explicitly turned on via Daily Growth
+        Setup, never picks up a setting nobody configured."""
+        return {
+            "stop_mode": "count",
+            "target_count": int(daily_cfg.get("target_count", 8)),
+            "target_minutes": 60,
+            "novelty": True,
+            "sim_threshold": 0.93,
+            "curate": True,
+            "vision_qa": False,
+            "vision_qa_expected_style": "",
+            "curate_threshold": 7.5,
+            "best_of": 1,
+            "quality_boost_mode": "Auto-Harmonize (Recommended)",
+            "style_strategy": "Dynamic Taste Priority",
+            "aspect_ratio": "Dynamic Smart Mix",
+            "lut_mood": "None (Original)",
+            "gpu_profile": "Balanced (Default)",
+            "thermal_cooling": False,
+            "fuse_characters": False, "fuse_every": 5,
+            "fusion_blends": False, "fusion_every": 3,
+            "wallpaper_cycles": bool(daily_cfg.get("wallpaper_cycles", False)),
+            "wallpaper_every": 5,
+            "cinematic_cycles": False, "cinematic_every": 5,
+            "fashion_cycles": False, "fashion_every": 5,
+            "storyboard_cycles": False, "storyboard_every": 5,
+            "photography_cycles": False, "photography_every": 5,
+            "waifu_cycles": False, "waifu_every": 6,
+            "var_models": False, "var_models_every": 5,
+            "var_loras": False, "var_samplers": False, "var_modes": False,
+            "var_llm_prompts": False,
+            "superpower_speed": False, "superpower_detail": False,
+            "negative": self.neg_text.get("1.0", "end").strip()
+                        if hasattr(self, "neg_text") else "",
+            "default_ckpt": self.ckpt_var.get() if hasattr(self, "ckpt_var") else "",
+            "default_steps": int(self.steps_var.get()) if hasattr(self, "steps_var") else 20,
+            "default_cfg": float(self.cfg_var.get()) if hasattr(self, "cfg_var") else 7.0,
+            "default_sampler": self.sampler_var.get() if hasattr(self, "sampler_var") else "euler_ancestral",
+            "default_sched": self.sched_var.get() if hasattr(self, "sched_var") else "normal",
+        }
+
+    def _run_daily_autopilot_headless(self):
+        """v9.13: --autopilot-daily entry point, called from main() before
+        any window is shown. Connects, builds a bounded daily cfg, and
+        runs _autopilot_worker_impl synchronously (no thread - there's no
+        mainloop to keep responsive here) so the process exits cleanly
+        once the run completes."""
+        daily_cfg = self._load_daily_autopilot_config()
+        if not daily_cfg.get("enabled"):
+            print("Daily Auto-Pilot is not enabled - see Daily Growth Setup.")
+            return
+        if not self.client.detect():
+            print("Daily Auto-Pilot: ComfyUI not reachable, skipping today.")
+            return
+        self.refresh_connection()
+        personas = [p for p in self.visible_personas() if p]
+        if not personas:
+            print("Daily Auto-Pilot: no personas configured, skipping.")
+            return
+        cfg = self._build_daily_autopilot_cfg(daily_cfg)
+        print(f"Daily Auto-Pilot: starting ({cfg['target_count']} images)...")
+        self.log = print
+        self._autopilot_worker_impl(personas, cfg)
+        print("Daily Auto-Pilot: done.")
+
+        # v9.13 + the user's stated "highest fidelity" goal: reuse
+        # Maximum Mode's finishing chain (tiled upscale + face/hand
+        # detailer, _run_maximum_mode_finishing, built and live-verified
+        # earlier this session) on the curated WINNERS only - the small
+        # subset that already scored above cfg["curate_threshold"] - not
+        # every candidate, keeping this bounded on a 6GB card while still
+        # pushing the actual output that matters to the highest quality
+        # this app can produce.
+        session_dir = getattr(self, "_ap_resume_session_dir", None)
+        if session_dir and (session_dir / "winners").exists():
+            winners = sorted((session_dir / "winners").glob("*.png"))
+            print(f"Daily Auto-Pilot: finishing {len(winners)} winner(s) "
+                  f"with Maximum Mode (tiled upscale + detailer)...")
+            for w in winners:
+                try:
+                    sidecar = json.loads(w.with_suffix(".json").read_text(
+                        encoding="utf-8"))
+                    positive = f"{sidecar.get('persona','')}, {sidecar.get('style','')}"
+                    finished = self._run_maximum_mode_finishing(
+                        w, positive, cfg.get("negative", ""),
+                        cfg.get("default_ckpt", ""), set_status=print)
+                    if finished != w:
+                        finished.replace(w)
+                        w.with_suffix(".json").write_text(json.dumps(
+                            sidecar, indent=1, ensure_ascii=False),
+                            encoding="utf-8")
+                        print(f"  finished: {w.name}")
+                except Exception as e:
+                    print(f"  Maximum Mode finishing skipped for {w.name}: {e}")
+
+    def _run_daily_channel_headless(self):
+        """v9.13: --channel-daily entry point, same shape as
+        _run_daily_autopilot_headless but for Channel Studio's
+        _channel_studio_worker (loop/quote/listicle niches)."""
+        daily_cfg = self._load_daily_channel_config()
+        if not daily_cfg.get("enabled"):
+            print("Daily Channel Studio is not enabled - see Daily Growth Setup.")
+            return
+        if not self.client.detect():
+            print("Daily Channel Studio: ComfyUI not reachable, skipping today.")
+            return
+        self.refresh_connection()
+        niches = daily_cfg.get("niches") or ["listicle"]
+        cfg = {
+            "stop_mode": "count",
+            "target_count": int(daily_cfg.get("target_count", 6)),
+            "target_minutes": 60,
+            "niches": niches,
+            "narrate": False,
+            "use_stock": False,
+        }
+        print(f"Daily Channel Studio: starting ({cfg['target_count']} "
+              f"items across {niches})...")
+        self.log = print
+        self._channel_studio_worker(cfg, print)
+        print("Daily Channel Studio: done.")
+
+    def open_daily_growth_setup(self):
+        """v9.13: one dialog to configure + schedule the two new daily
+        headless entry points, mirroring open_mastermind's
+        schedule_nightly() button pattern exactly (same schtasks
+        /Create /SC DAILY /ST shape, staggered off MasterMind's existing
+        3:00 AM slot so the three don't compete for this 6GB card's GPU)."""
+        ap_cfg = self._load_daily_autopilot_config()
+        ch_cfg = self._load_daily_channel_config()
+
+        win, body = self._new_toplevel("📅 Daily Growth Setup", 520, 480)
+        tk.Label(body, text="📅 Daily Growth Setup", bg=self.PANEL,
+                 fg=self.ACCENT, font=self.font_heading).pack(
+            anchor="w", padx=12, pady=(12, 4))
+        tk.Label(body, text="Configures unattended daily production runs. "
+                "Posting is never automatic - review and post what's "
+                "ready in the Channel Command Center's Ledger tab "
+                "yourself.", bg=self.PANEL, fg=self.FG_MUTED,
+                wraplength=460, justify="left").pack(
+            anchor="w", padx=12, pady=(0, 10))
+
+        ap_var = tk.BooleanVar(value=bool(ap_cfg.get("enabled")))
+        tk.Checkbutton(body, text="⚡ Daily Auto-Pilot (personas)",
+                       variable=ap_var, bg=self.PANEL, fg=self.FG,
+                       selectcolor=self.INPUT_BG,
+                       activebackground=self.PANEL).pack(
+            anchor="w", padx=12, pady=(6, 0))
+        rr = tk.Frame(body, bg=self.PANEL)
+        rr.pack(fill="x", padx=28, pady=2)
+        tk.Label(rr, text="Images/day", bg=self.PANEL, fg=self.FG_DIM).pack(side="left")
+        ap_count_var = tk.IntVar(value=int(ap_cfg.get("target_count", 8)))
+        ttk.Spinbox(rr, textvariable=ap_count_var, from_=1, to=50,
+                    width=6).pack(side="left", padx=6)
+
+        ch_var = tk.BooleanVar(value=bool(ch_cfg.get("enabled")))
+        tk.Checkbutton(body, text="📺 Daily Channel Studio (loops/quotes/listicles)",
+                       variable=ch_var, bg=self.PANEL, fg=self.FG,
+                       selectcolor=self.INPUT_BG,
+                       activebackground=self.PANEL).pack(
+            anchor="w", padx=12, pady=(10, 0))
+        rr = tk.Frame(body, bg=self.PANEL)
+        rr.pack(fill="x", padx=28, pady=2)
+        tk.Label(rr, text="Items/day", bg=self.PANEL, fg=self.FG_DIM).pack(side="left")
+        ch_count_var = tk.IntVar(value=int(ch_cfg.get("target_count", 6)))
+        ttk.Spinbox(rr, textvariable=ch_count_var, from_=1, to=50,
+                    width=6).pack(side="left", padx=6)
+        tk.Label(body, text="Niches (comma-separated, from CHANNEL_NICHES "
+                "keys):", bg=self.PANEL, fg=self.FG_DIM).pack(
+            anchor="w", padx=28, pady=(4, 0))
+        ch_niches_var = tk.StringVar(
+            value=", ".join(ch_cfg.get("niches", ["listicle", "gaming_facts"])))
+        tk.Entry(body, textvariable=ch_niches_var, bg=self.INPUT_BG,
+                 fg=self.FG).pack(fill="x", padx=28, pady=2)
+
+        def save_config():
+            safe_json_save(self._daily_config_path("daily_autopilot_config.json"),
+                           {"enabled": bool(ap_var.get()),
+                            "target_count": int(ap_count_var.get())})
+            niches = [n.strip() for n in ch_niches_var.get().split(",") if n.strip()]
+            safe_json_save(self._daily_config_path("daily_channel_config.json"),
+                           {"enabled": bool(ch_var.get()),
+                            "target_count": int(ch_count_var.get()),
+                            "niches": niches or ["listicle"]})
+            self.log("Daily Growth Setup: config saved")
+            messagebox.showinfo("Saved", "Daily production config saved.",
+                                parent=win)
+
+        def schedule_daily(flag, task_name, start_time):
+            exe = sys.executable if getattr(sys, "frozen", False) else None
+            if not exe:
+                messagebox.showinfo("Use the exe", "Daily scheduling works "
+                                    "from the built exe.", parent=win)
+                return
+            if not messagebox.askyesno(
+                "Schedule daily task",
+                f"Create a Windows scheduled task that runs "
+                f"'{exe} {flag}' every day at {start_time}?", parent=win):
+                return
+
+            def _w():
+                try:
+                    r = subprocess.run(
+                        ["schtasks", "/Create", "/F", "/TN", task_name,
+                         "/TR", f'"{exe}" {flag}', "/SC", "DAILY",
+                         "/ST", start_time],
+                        capture_output=True, text=True, timeout=30)
+                    if r.returncode == 0:
+                        self.root.after(0, lambda: messagebox.showinfo(
+                            "Scheduled", f"{task_name} scheduled "
+                            f"({start_time} daily).", parent=win))
+                    else:
+                        err = r.stderr[:300]
+                        self.root.after(0, lambda: messagebox.showerror(
+                            "Schedule failed", err, parent=win))
+                except Exception as e:
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Schedule failed", str(e), parent=win))
+            threading.Thread(target=_w, daemon=True).start()
+
+        btn_row = tk.Frame(body, bg=self.PANEL)
+        btn_row.pack(fill="x", padx=12, pady=(16, 4))
+        ttk.Button(btn_row, text="💾 Save Config",
+                  command=save_config).pack(side="left")
+        ttk.Button(btn_row, text="📅 Schedule Auto-Pilot (4:00 AM)",
+                  command=lambda: schedule_daily(
+                      "--autopilot-daily", "3klipz Daily AutoPilot",
+                      "04:00")).pack(side="left", padx=(8, 0))
+        ttk.Button(btn_row, text="📅 Schedule Channel Studio (5:00 AM)",
+                  command=lambda: schedule_daily(
+                      "--channel-daily", "3klipz Daily Channel",
+                      "05:00")).pack(side="left", padx=(8, 0))
+        self.log("Opened Daily Growth Setup")
+
     def open_mastermind(self):
         """Goal editor, buffer status, approval gate, cycle control."""
         mm = MasterMind()
@@ -21548,6 +21809,7 @@ Click history arrows to replay generations
             ("🧠 MasterMind Orchestrator", self.open_mastermind),
             ("📺 Channel Studio Command Center",
              self.open_channel_command_center),
+            ("📅 Daily Growth Setup", self.open_daily_growth_setup),
             ("🏷 Package for Listing (Etsy/KDP)",
              self.open_listing_packager),
             None,
@@ -28663,6 +28925,23 @@ def main():
         # headless nightly production cycle (Task Scheduler entry point)
         try:
             run_mastermind_cycle()
+        except Exception as e:
+            log_crash(type(e), e, e.__traceback__)
+        return
+    if "--autopilot-daily" in sys.argv or "--channel-daily" in sys.argv:
+        # v9.13: same headless pre-Tk pattern as --mastermind above, but
+        # these two need a real (hidden) CompanionApp instance since
+        # _autopilot_worker_impl/_channel_studio_worker are instance
+        # methods reading many self.*_var Tkinter vars - unlike
+        # run_mastermind_cycle, which is a standalone module function.
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            app = CompanionApp(root)
+            if "--autopilot-daily" in sys.argv:
+                app._run_daily_autopilot_headless()
+            if "--channel-daily" in sys.argv:
+                app._run_daily_channel_headless()
         except Exception as e:
             log_crash(type(e), e, e.__traceback__)
         return
