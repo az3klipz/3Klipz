@@ -16488,8 +16488,29 @@ Click history arrows to replay generations
     # (combined Auto-Pilot dialog kept as-is for power users - these are
     # simpler, focused, single-purpose alternatives, mirroring the
     # Quote Pilot / Autopilot Duo pattern already established.)
+    def _build_aesthetic_selector_row(self, parent):
+        """v11.0: shared 3-way Anime/Realistic/Mixed selector, reused by
+        both the Auto-Pilot dialog and any standalone Pilot whose PILOTS
+        entry sets aesthetic_aware=True - avoids a third copy-pasted
+        Radiobutton row. Returns the StringVar (default "mixed")."""
+        tk.Label(parent, text="🎨 AESTHETIC MODE", bg=self.PANEL,
+                 fg=self.ACCENT, font=self.font_body_bold).pack(
+            anchor="w", padx=12, pady=(4, 2))
+        row = tk.Frame(parent, bg=self.PANEL)
+        row.pack(fill="x", padx=12)
+        var = tk.StringVar(value="mixed")
+        for val, label in (("mixed", "Mixed"), ("anime", "Anime"),
+                           ("realistic", "Realistic")):
+            tk.Radiobutton(row, text=label, value=val, variable=var,
+                          bg=self.PANEL, fg=self.FG_DIM,
+                          selectcolor=self.INPUT_BG,
+                          activebackground=self.PANEL).pack(
+                side="left", padx=(0, 10))
+        return var
+
     def _open_pilot_dialog(self, title, description, worker_target, *,
-                           needs_two_personas=False, extra_guard=None):
+                           needs_two_personas=False, extra_guard=None,
+                           aesthetic_aware=False):
         """Shared dialog builder for every simple standalone pilot: the
         same stop-condition (count/minutes/infinite) UI, the same
         busy/offline/personas guards, launched against whatever
@@ -16551,6 +16572,9 @@ Click history arrows to replay generations
                       fg=self.FG, selectcolor=self.INPUT_BG,
                       activebackground=self.PANEL).pack(anchor="w", padx=12)
 
+        aesthetic_var = (self._build_aesthetic_selector_row(body)
+                         if aesthetic_aware else None)
+
         status = tk.Label(body, text="Ready", bg=self.PANEL,
                           fg=self.FG_MUTED, wraplength=480, justify="left")
         status.pack(anchor="w", padx=12, pady=8)
@@ -16560,6 +16584,7 @@ Click history arrows to replay generations
                 "stop_mode": stop_var.get(),
                 "target_count": int(count_var.get()),
                 "target_minutes": int(minutes_var.get()),
+                "aesthetic_mode": aesthetic_var.get() if aesthetic_var else "mixed",
             }
             go_btn.configure(state="disabled", text="Running...")
             self.stop_flag = False
@@ -16590,6 +16615,24 @@ Click history arrows to replay generations
         made = 0
         queue = list(personas)
         random.shuffle(queue)
+        # v11.0: aesthetic-lock (Wallpaper/Cinematic/Fashion Pilots opt in
+        # via PILOTS[...]["aesthetic_aware"]) - style pool is filtered per
+        # pick below; checkpoint is picked once for the whole run (these
+        # pilots don't rotate checkpoints mid-run the way Auto-Pilot's
+        # var_models does) and self.ckpt_var is restored in `finally` so
+        # the main window's own selection isn't left mutated afterward.
+        aesthetic_mode = cfg.get("aesthetic_mode", "mixed")
+        original_ckpt = self.ckpt_var.get() if hasattr(self, "ckpt_var") else None
+        if aesthetic_mode in ("anime", "realistic") and original_ckpt:
+            classified = self.client.get_checkpoints_classified()
+            matching = [c for c, r in classified.items()
+                       if r in (aesthetic_mode, "unknown")]
+            if matching and classified.get(original_ckpt) not in (
+                    aesthetic_mode, "unknown"):
+                new_ckpt = random.choice(matching)
+                self.ckpt_var.set(new_ckpt)
+                self.log(f"{pilot_name}: switched checkpoint to "
+                        f"'{new_ckpt}' to match {aesthetic_mode} mode")
         try:
             while True:
                 if self.stop_flag:
@@ -16619,7 +16662,8 @@ Click history arrows to replay generations
                           f": {name}")
                 try:
                     style = self.taste.pick_style(
-                        pilot_name.lower().replace(" ", "_"), ART_STYLES)
+                        pilot_name.lower().replace(" ", "_"),
+                        styles_for_realism(aesthetic_mode))
                     path = item_fn(persona, style, other)
                     if path is None:
                         self.log(f"{pilot_name}: '{name}' failed, continuing")
@@ -16638,6 +16682,8 @@ Click history arrows to replay generations
             self.log(f"=== {pilot_name} DONE: {made} made in "
                      f"{elapsed / 60:.1f} min ===")
             set_status(f"{pilot_name} done: {made} made")
+            if original_ckpt and self.ckpt_var.get() != original_ckpt:
+                self.ckpt_var.set(original_ckpt)
             self.busy = False
             self.root.after(0, lambda: (
                 self.stop_btn.configure(state="disabled"),
@@ -16848,6 +16894,7 @@ Click history arrows to replay generations
                 "character needed every time, just Wallpaper Lab's core "
                 "on a loop."),
             "item_fn": _pilot_item_wallpaper,
+            "aesthetic_aware": True,
         },
         "cinematic": {
             "title": "🎬 Cinematic Pilot",
@@ -16856,6 +16903,7 @@ Click history arrows to replay generations
                 "cinematic scenes - sometimes with a random persona "
                 "in-frame, sometimes pure environment."),
             "item_fn": _pilot_item_cinematic,
+            "aesthetic_aware": True,
         },
         "fashion": {
             "title": "👗 Fashion Pilot",
@@ -16863,6 +16911,7 @@ Click history arrows to replay generations
                 "Repeatedly generates a concept-art or editorial-shot "
                 "outfit look per persona."),
             "item_fn": _pilot_item_fashion,
+            "aesthetic_aware": True,
         },
         "storyboard": {
             "title": "📖 Storyboard Pilot",
@@ -16907,7 +16956,8 @@ Click history arrows to replay generations
             spec["title"], spec["description"], worker,
             needs_two_personas=spec.get("needs_two_personas", False),
             extra_guard=(lambda: spec["extra_guard"](self))
-                       if spec.get("extra_guard") else None)
+                       if spec.get("extra_guard") else None,
+            aesthetic_aware=spec.get("aesthetic_aware", False))
 
     def _fetch_stock_clip(self, niche: str, out_path, target_size=(1920, 1080)):
         """v9.11: real public-domain stock footage as an opt-in
