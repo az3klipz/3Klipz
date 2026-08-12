@@ -836,6 +836,10 @@ ART_STYLES = [
     "vintage tintype photography, sepia metallic sheen, soft focus edges, 19th-century portrait feel",
     "cinemagraph still-photography aesthetic, frozen motion tension, subtle atmospheric haze",
     "high fashion editorial photography, dramatic hard shadow, avant-garde styling, glossy print finish",
+    "banksy-inspired street art, stencil spray-paint technique, high-contrast monochrome with one bold "
+    "accent color, satirical subversive tone, weathered concrete wall texture, urban activist mood",
+    "street art mural, bold graffiti linework, layered spray-can textures, wheat-paste poster grit, "
+    "raw urban wall backdrop",
 ]
 
 # v9.13: the subset of ART_STYLES that are real photography styles
@@ -871,6 +875,8 @@ ARTIST_INFLUENCES = {
                        "Greg Rutkowski", "Artgerm"],
     "graphic_poster": ["Saul Bass", "Alphonse Mucha", "Shepard Fairey",
                        "Tom Whalen"],
+    "street_art": ["Banksy", "Shepard Fairey", "Keith Haring",
+                  "Jean-Michel Basquiat", "Invader"],
 }
 HYPER_DETAIL_BOOSTERS = [
     "perfect composition", "intricate linework", "hyper detailed",
@@ -903,6 +909,8 @@ def _pick_artist_influences(style: str, n: int = 2) -> str:
         "photorealistic": ("photorealistic", "hyperrealistic", "editorial",
                           "studio lighting", "photography", "photo"),
         "graphic_poster": ("poster", "flat design", "graphic", "album cover"),
+        "street_art": ("banksy", "street art", "stencil", "graffiti",
+                      "spray-paint", "spray paint", "mural", "wheat-paste"),
     }
     matched = [bucket for bucket, kws in bucket_keywords.items()
               if any(kw in s for kw in kws)]
