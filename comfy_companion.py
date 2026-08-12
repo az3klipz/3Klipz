@@ -287,7 +287,7 @@ except ImportError:
 # Tk's default "tk" title. Everything that names the product now derives
 # from the three constants below; nothing hardcodes a name or version.
 APP_NAME = "3klipz Studio"
-APP_VERSION = "9.12"
+APP_VERSION = "11.0"
 APP_EDITION = "Kids" if IS_KIDS_MODE else "Pro"
 APP_TITLE = f"{APP_NAME} {APP_EDITION}"
 # v10.4: fill this in with the real "owner/repo" once published on GitHub -
