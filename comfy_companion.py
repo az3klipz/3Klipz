@@ -8098,8 +8098,34 @@ def typo_text(preset: str, text: str) -> str:
 VIRAL_BOOST = ("eye-catching composition, dramatic lighting, high contrast, "
                "vibrant colors, sharp focus, trending")
 
-SHARED_MODELS_DIR = (r"C:\Users\phase\AppData\Local\Comfy-Desktop"
-                     r"\ComfyUI-Shared\models")
+def _find_shared_models_dir() -> str:
+    """v11.1: was a hardcoded C:\\Users\\phase\\... literal - every model
+    download (Wan I2V/Krea/upscale/LoRA install/etc) silently wrote to a
+    path that only existed on the original dev machine, so on any other
+    computer the download either failed outright or landed somewhere
+    ComfyUI never reads. Resolve from %LOCALAPPDATA% instead, same
+    pattern as COMFY_DESKTOP_EXE/_find_comfyui_venv_python. Falls back to
+    the first real per-install models/ folder if ComfyUI Desktop's
+    Shared-models feature isn't set up, so downloads still land
+    somewhere ComfyUI will actually load them from."""
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        return (r"C:\Users\phase\AppData\Local\Comfy-Desktop"
+                r"\ComfyUI-Shared\models")
+    shared = Path(base) / "Comfy-Desktop" / "ComfyUI-Shared" / "models"
+    if shared.exists():
+        return str(shared)
+    try:
+        matches = sorted(Path(base).glob(
+            "Comfy-Desktop/ComfyUI-Installs/*/ComfyUI/models"))
+        if matches:
+            return str(matches[0])
+    except Exception:
+        pass
+    return str(shared)
+
+
+SHARED_MODELS_DIR = _find_shared_models_dir()
 
 # v9.11: real Wan 2.1 I2V checkpoints, for machines with more VRAM than
 # this dev machine's 6GB card (real local I2V needs the 14B model -
